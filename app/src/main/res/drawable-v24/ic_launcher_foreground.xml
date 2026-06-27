@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Thermometer icon -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,20 C51.24,20 49,22.24 49,25 L49,63.06 C46.6,64.57 45,67.1 45,70 C45,74.42 48.58,78 53,78 L55,78 C59.42,78 63,74.42 63,70 C63,67.1 61.4,64.57 59,63.06 L59,25 C59,22.24 56.76,20 54,20 Z M54,24 C54.55,24 55,24.45 55,25 L55,65 L57,66.16 C58.84,67.22 60,69.03 60,71 C60,73.21 58.21,75 56,75 L52,75 C49.79,75 48,73.21 48,71 C48,69.03 49.16,67.22 51,66.16 L53,65 L53,25 C53,24.45 53.45,24 54,24 Z" />
+</vector>

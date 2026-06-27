@@ -1,0 +1,35 @@
+# Gradle
+.gradle/
+build/
+**/build/
+
+# Android / Kotlin build artifacts
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+.kotlin/
+
+# Local config (machine-specific; contains SDK path)
+local.properties
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Keystores / secrets
+*.jks
+*.keystore
+
+# Local debugging scratch
+debugImages/
+captures/
