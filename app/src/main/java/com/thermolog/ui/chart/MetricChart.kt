@@ -294,11 +294,19 @@ fun MetricChart(
             TextStyle(fontSize = 9.sp, color = Color(0x44FFFFFF)))
         drawText(hint, topLeft = Offset(PAD_L + (w - hint.size.width) / 2f, PAD_T + h - hint.size.height - 2f))
 
-        // Min & max pills
-        val maxP = points.maxByOrNull { it.hi }!!
-        val minP = points.minByOrNull { it.lo }!!
-        drawMarker(textMeasurer, xOf(maxP.tMs), yOf(maxP.hi), "%.1f".format(maxP.hi), colorAt(maxP.hi), above = true)
-        drawMarker(textMeasurer, xOf(minP.tMs), yOf(minP.lo), "%.1f".format(minP.lo), colorAt(minP.lo), above = false)
+§        // Min & max pills — placed on the actual plotted line (midpoint in hourly,
+        // the hi/lo envelope in daily/monthly)
+        if (lod == Lod.HOURLY) {
+            val maxP = points.maxByOrNull { it.mid }!!
+            val minP = points.minByOrNull { it.mid }!!
+            drawMarker(textMeasurer, xOf(maxP.tMs), yOf(maxP.mid), "%.1f".format(maxP.mid), colorAt(maxP.mid), above = true)
+            drawMarker(textMeasurer, xOf(minP.tMs), yOf(minP.mid), "%.1f".format(minP.mid), colorAt(minP.mid), above = false)
+        } else {
+            val maxP = points.maxByOrNull { it.hi }!!
+            val minP = points.minByOrNull { it.lo }!!
+            drawMarker(textMeasurer, xOf(maxP.tMs), yOf(maxP.hi), "%.1f".format(maxP.hi), colorAt(maxP.hi), above = true)
+            drawMarker(textMeasurer, xOf(minP.tMs), yOf(minP.lo), "%.1f".format(minP.lo), colorAt(minP.lo), above = false)
+        }
 
         // X-axis time labels
         val tfmt = timeAxisFormat(lod)
