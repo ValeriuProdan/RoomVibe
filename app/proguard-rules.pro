@@ -1,1 +1,1 @@
--keep class com.thermolog.data.entity.** { *; }
+-keep class com.roomvibe.data.entity.** { *; }

@@ -15,10 +15,12 @@ val keystoreProps = Properties().apply {
 }
 
 android {
-    namespace = "com.thermolog"
+    namespace = "com.roomvibe"
     compileSdk = 36
 
     defaultConfig {
+        // Kept as com.thermolog so already-published (v1.0) installs can update;
+        // changing it would create a separate app on users' devices.
         applicationId = "com.thermolog"
         minSdk = 26
         targetSdk = 36
