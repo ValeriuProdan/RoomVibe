@@ -93,9 +93,10 @@ fun SensorDetailScreen(
                         actionIconContentColor = Color.White
                     ),
                     actions = {
-                        IconButton(onClick = { showGattExplorer = !showGattExplorer }) {
-                            Icon(Icons.Default.Build, "GATT Explorer")
-                        }
+                        // GATT Explorer hidden for now — keep the code, just no entry point.
+                        // IconButton(onClick = { showGattExplorer = !showGattExplorer }) {
+                        //     Icon(Icons.Default.Build, "GATT Explorer")
+                        // }
                     }
                 )
             }
