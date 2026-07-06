@@ -9,6 +9,12 @@ near the sensor. RoomVibe downloads the sensor's on-device history (a few months
 saves it locally on your phone, and lets you explore **any** hour, day, or month —
 even when you're away from home.
 
+<p align="center">
+  <img src="docs/xiaomi-no-connection.jpg" width="35%" alt="The official Xiaomi app showing no data when it can't reach the sensor" />
+  <br>
+  <em>The official app shows nothing when it isn't connected to the sensor over Bluetooth.</em>
+</p>
+
 > Not affiliated with or endorsed by Xiaomi. "Xiaomi" and "Mijia" are trademarks of
 > their respective owners.
 
