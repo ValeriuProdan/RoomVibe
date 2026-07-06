@@ -11,6 +11,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items as lazyItems
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -222,6 +224,7 @@ fun SensorListScreen(
                 results = state.scanResults,
                 knownAddresses = state.sensors.map { it.address }.toSet(),
                 liveTemps = state.liveTemps,
+                fahrenheit = fahrenheit,
                 onRescan = { viewModel.scanForDevices() },
                 onAdd = { device ->
                     viewModel.addSensor(device)
@@ -495,6 +498,7 @@ private fun ScanSheet(
     results: List<FoundDevice>,
     knownAddresses: Set<String>,
     liveTemps: Map<String, TempProbe>,
+    fahrenheit: Boolean,
     onRescan: () -> Unit,
     onAdd: (FoundDevice) -> Unit
 ) {
@@ -504,59 +508,67 @@ private fun ScanSheet(
     val likely = results.filter { it.isLikelySensor }.sortedByDescending { it.rssi }
     val others = results.filterNot { it.isLikelySensor }.sortedByDescending { it.rssi }
 
-    Column(Modifier.padding(16.dp).fillMaxWidth()) {
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text("Scan for sensors", style = MaterialTheme.typography.titleLarge)
-            TextButton(onClick = onRescan, enabled = !isScanning) {
-                Icon(Icons.Default.Refresh, null, Modifier.size(18.dp))
-                Spacer(Modifier.width(4.dp))
-                Text("Scan again")
+    // Scrollable so all devices are reachable even when there are dozens of them.
+    LazyColumn(Modifier.fillMaxWidth().heightIn(max = 560.dp).padding(horizontal = 16.dp)) {
+        item {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text("Scan for sensors", style = MaterialTheme.typography.titleLarge)
+                TextButton(onClick = onRescan, enabled = !isScanning) {
+                    Icon(Icons.Default.Refresh, null, Modifier.size(18.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("Scan again")
+                }
+            }
+            NotFindingDeviceHelp()
+            Spacer(Modifier.height(8.dp))
+            if (isScanning) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                    Text("Scanning… walk right up to the sensor", style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            Spacer(Modifier.height(8.dp))
+            if (results.isEmpty() && !isScanning) {
+                Text("No Bluetooth devices found at all. Check that the phone's Location " +
+                    "switch is ON (Samsung needs it for scanning) and Bluetooth is enabled.",
+                    style = MaterialTheme.typography.bodySmall)
+            }
+            if (likely.isNotEmpty()) {
+                Text("Likely sensors", style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary)
             }
         }
 
-        NotFindingDeviceHelp()
-
-        Spacer(Modifier.height(8.dp))
-        if (isScanning) {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
-                Text("Scanning… walk right up to the sensor", style = MaterialTheme.typography.bodySmall)
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-
-        if (results.isEmpty() && !isScanning) {
-            Text("No Bluetooth devices found at all. Check that the phone's Location " +
-                "switch is ON (Samsung needs it for scanning) and Bluetooth is enabled.",
-                style = MaterialTheme.typography.bodySmall)
-        }
-
-        if (likely.isNotEmpty()) {
-            Text("Likely sensors", style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary)
-            likely.forEach { DeviceRow(it, it.address in knownAddresses, liveTemps[it.address], onAdd) }
+        lazyItems(likely, key = { "L" + it.address }) {
+            DeviceRow(it, it.address in knownAddresses, liveTemps[it.address], fahrenheit, onAdd)
         }
 
         if (others.isNotEmpty()) {
-            Spacer(Modifier.height(8.dp))
-            TextButton(onClick = { showAll = !showAll }) {
-                Text(if (showAll) "Hide other devices (${others.size})"
-                     else "Show all other Bluetooth devices (${others.size})")
+            item {
+                Spacer(Modifier.height(8.dp))
+                TextButton(onClick = { showAll = !showAll }) {
+                    Text(if (showAll) "Hide other devices (${others.size})"
+                         else "Show all other Bluetooth devices (${others.size})")
+                }
+                if (showAll) {
+                    Text("If your sensor isn't above, it may show here as \"(unnamed device)\". " +
+                        "Pick the one with the strongest signal while standing next to it.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                }
             }
             if (showAll) {
-                Text("If your sensor isn't above, it may show here as \"(unnamed device)\". " +
-                    "Pick the one with the strongest signal while standing next to it.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
-                others.forEach { DeviceRow(it, it.address in knownAddresses, liveTemps[it.address], onAdd) }
+                lazyItems(others, key = { "O" + it.address }) {
+                    DeviceRow(it, it.address in knownAddresses, liveTemps[it.address], fahrenheit, onAdd)
+                }
             }
         }
 
-        Spacer(Modifier.height(24.dp))
+        item { Spacer(Modifier.height(24.dp)) }
     }
 }
 
@@ -565,9 +577,9 @@ private fun DeviceRow(
     device: FoundDevice,
     alreadyAdded: Boolean,
     probe: TempProbe?,
+    fahrenheit: Boolean,
     onAdd: (FoundDevice) -> Unit
 ) {
-    val fahrenheit by AppSettings.get(LocalContext.current).fahrenheit.collectAsStateWithLifecycle()
     ListItem(
         headlineContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
