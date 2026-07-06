@@ -12,6 +12,14 @@ even when you're away from home.
 > Not affiliated with or endorsed by Xiaomi. "Xiaomi" and "Mijia" are trademarks of
 > their respective owners.
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshot-main.jpg" width="45%" alt="Sensor list" />
+  &nbsp;&nbsp;
+  <img src="docs/screenshot-details.jpg" width="45%" alt="Temperature &amp; humidity charts" />
+</p>
+
 ## Download
 
 📦 **[Download the latest APK »](https://github.com/ValeriuProdan/ThermoLog/releases/latest)**
