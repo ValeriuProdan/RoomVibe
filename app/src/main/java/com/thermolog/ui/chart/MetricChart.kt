@@ -55,6 +55,45 @@ fun zoomLabel(span: Long): String = when (lodFor(span)) {
     Lod.MONTHLY -> "Monthly"
 }
 
+// Temperature → colour ramp: cold = blue, hot = red, with shades between.
+private val TEMP_STOPS = listOf(
+    -5f to Color(0xFF1E6FE0),   // deep blue
+    5f to Color(0xFF2E9BF0),    // blue
+    12f to Color(0xFF20C4C9),   // cyan
+    18f to Color(0xFF4CAF50),   // green
+    23f to Color(0xFFF4C020),   // amber
+    28f to Color(0xFFFF7A1A),   // orange
+    34f to Color(0xFFE53935)    // red
+)
+
+// Humidity → comfort ramp: green at the ideal (~48%), shading to red at both
+// extremes (too dry and too humid).
+private val HUMID_STOPS = listOf(
+    15f to Color(0xFFE53935),   // too dry — red
+    30f to Color(0xFFFB8C00),   // orange
+    40f to Color(0xFF9CCC65),   // light green
+    48f to Color(0xFF43A047),   // ideal — green
+    56f to Color(0xFF9CCC65),   // light green
+    68f to Color(0xFFFB8C00),   // orange
+    82f to Color(0xFFE53935)    // too humid — red
+)
+
+private fun interpStops(value: Float, stops: List<Pair<Float, Color>>): Color {
+    val first = stops.first()
+    val last = stops.last()
+    if (value <= first.first) return first.second
+    if (value >= last.first) return last.second
+    for (i in 0 until stops.size - 1) {
+        val (v0, c0) = stops[i]
+        val (v1, c1) = stops[i + 1]
+        if (value in v0..v1) return lerp(c0, c1, (value - v0) / (v1 - v0))
+    }
+    return last.second
+}
+
+fun tempColor(celsius: Float): Color = interpStops(celsius, TEMP_STOPS)
+fun humidColor(percent: Float): Color = interpStops(percent, HUMID_STOPS)
+
 data class Viewport(val startMs: Long, val endMs: Long) {
     val span get() = (endMs - startMs).coerceAtLeast(1L)
 }
@@ -84,6 +123,7 @@ fun MetricChart(
     scrubberMs: Long?,
     showTimeLabel: Boolean,
     showTitle: Boolean = true,
+    colorByValue: Boolean = false,
     onViewportChange: (Viewport) -> Unit,
     onScrub: (Long?) -> Unit,
     modifier: Modifier = Modifier
@@ -194,27 +234,56 @@ fun MetricChart(
             drawText(lbl, topLeft = Offset(PAD_L + w + 8f, y - lbl.size.height / 2))
         }
 
+        // Colour a value using the metric's ramp when colorByValue, else the accent
+        fun colorAt(v: Float): Color = when {
+            !colorByValue -> accent
+            metric == Metric.TEMP -> tempColor(v)
+            else -> humidColor(v)
+        }
+
         // Build screen-space points for the primary (hi/mid) line
         val primary = points.map { Offset(xOf(it.tMs), yOf(if (lod == Lod.HOURLY) it.mid else it.hi)) }
+        val primaryVals = points.map { if (lod == Lod.HOURLY) it.mid else it.hi }
 
-        // Gradient fill under the primary line
-        val fill = smoothPath(primary).apply {
-            lineTo(primary.last().x, PAD_T + h)
-            lineTo(primary.first().x, PAD_T + h)
-            close()
+        // Horizontal gradient brush that colours a line by each point's value
+        fun valueBrush(values: List<Float>, alpha: Float): Brush {
+            val firstX = primary.first().x; val lastX = primary.last().x
+            val gspan = lastX - firstX
+            if (gspan <= 0f) return SolidColor(colorAt(values.first()).copy(alpha = alpha))
+            var prev = -1f
+            val stops = primary.indices.map { i ->
+                var f = ((primary[i].x - firstX) / gspan).coerceIn(0f, 1f)
+                if (f <= prev) f = (prev + 1e-4f).coerceAtMost(1f)
+                prev = f
+                f to colorAt(values[i]).copy(alpha = alpha)
+            }
+            return Brush.linearGradient(colorStops = stops.toTypedArray(),
+                start = Offset(firstX, 0f), end = Offset(lastX, 0f))
         }
-        drawPath(fill, Brush.verticalGradient(
-            listOf(accent.copy(alpha = 0.35f), accent.copy(alpha = 0.02f)),
-            startY = PAD_T, endY = PAD_T + h))
+
+        // Fill under the primary line (skipped for the value-coloured temperature line)
+        if (!colorByValue) {
+            val fill = smoothPath(primary).apply {
+                lineTo(primary.last().x, PAD_T + h)
+                lineTo(primary.first().x, PAD_T + h)
+                close()
+            }
+            drawPath(fill, Brush.verticalGradient(
+                listOf(accent.copy(alpha = 0.35f), accent.copy(alpha = 0.02f)),
+                startY = PAD_T, endY = PAD_T + h))
+        }
 
         // Primary line
-        drawPath(smoothPath(primary), accent, style = Stroke(2.6f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        val lineStroke = Stroke(4.0f, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        if (colorByValue) drawPath(smoothPath(primary), valueBrush(primaryVals, alpha = 1f), style = lineStroke)
+        else drawPath(smoothPath(primary), accent, style = lineStroke)
 
         // Min line (dashed) for daily/monthly
         if (lod != Lod.HOURLY) {
             val lows = points.map { Offset(xOf(it.tMs), yOf(it.lo)) }
-            drawPath(smoothPath(lows), accent.copy(alpha = 0.6f),
-                style = Stroke(2f, cap = StrokeCap.Round, join = StrokeJoin.Round, pathEffect = dash))
+            val minStroke = Stroke(3.0f, cap = StrokeCap.Round, join = StrokeJoin.Round, pathEffect = dash)
+            if (colorByValue) drawPath(smoothPath(lows), valueBrush(points.map { it.lo }, alpha = 0.9f), style = minStroke)
+            else drawPath(smoothPath(lows), accent.copy(alpha = 0.6f), style = minStroke)
         }
 
         // Subtle hint marking the lower pan zone
@@ -228,8 +297,8 @@ fun MetricChart(
         // Min & max pills
         val maxP = points.maxByOrNull { it.hi }!!
         val minP = points.minByOrNull { it.lo }!!
-        drawMarker(textMeasurer, xOf(maxP.tMs), yOf(maxP.hi), "%.1f".format(maxP.hi), accent, above = true)
-        drawMarker(textMeasurer, xOf(minP.tMs), yOf(minP.lo), "%.1f".format(minP.lo), accent, above = false)
+        drawMarker(textMeasurer, xOf(maxP.tMs), yOf(maxP.hi), "%.1f".format(maxP.hi), colorAt(maxP.hi), above = true)
+        drawMarker(textMeasurer, xOf(minP.tMs), yOf(minP.lo), "%.1f".format(minP.lo), colorAt(minP.lo), above = false)
 
         // X-axis time labels
         val tfmt = timeAxisFormat(lod)
@@ -251,15 +320,16 @@ fun MetricChart(
                 drawLine(Color(0x88FFFFFF), Offset(x, PAD_T), Offset(x, PAD_T + h), 1.5f)
 
                 if (lod == Lod.HOURLY) {
-                    drawScrubDot(x, yOf(near.mid), accent)
+                    drawScrubDot(x, yOf(near.mid), colorAt(near.mid))
                 } else {
-                    drawScrubDot(x, yOf(near.hi), accent)
-                    drawScrubDot(x, yOf(near.lo), accent)
+                    drawScrubDot(x, yOf(near.hi), colorAt(near.hi))
+                    drawScrubDot(x, yOf(near.lo), colorAt(near.lo))
                 }
 
                 val valStr = if (lod == Lod.HOURLY) "%.1f%s".format(near.mid, unit)
                              else "%.1f–%.1f%s".format(near.lo, near.hi, unit)
-                drawMarker(textMeasurer, x, PAD_T + 2f, valStr, accent, above = false, solidBg = true)
+                val pillColor = if (lod == Lod.HOURLY) colorAt(near.mid) else colorAt(near.hi)
+                drawMarker(textMeasurer, x, PAD_T + 2f, valStr, pillColor, above = false, solidBg = true)
 
                 if (showTimeLabel) {
                     val title2 = tooltipTitle(near.bucketStart, lod)

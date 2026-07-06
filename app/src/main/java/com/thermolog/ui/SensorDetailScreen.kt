@@ -130,6 +130,7 @@ fun SensorDetailScreen(
                     title = "Temperature", unit = "°", metric = Metric.TEMP,
                     accent = TempAccent, readings = state.readings, viewport = vp ?: Viewport(0, 1),
                     scrubberMs = scrubberMs, showTimeLabel = true, showTitle = !isLandscape,
+                    colorByValue = true,
                     onViewportChange = { viewport = it }, onScrub = { scrubberMs = it },
                     modifier = Modifier.fillMaxSize()
                 )
@@ -141,6 +142,7 @@ fun SensorDetailScreen(
                     title = "Humidity", unit = "%", metric = Metric.HUMIDITY,
                     accent = HumidAccent, readings = state.readings, viewport = vp ?: Viewport(0, 1),
                     scrubberMs = scrubberMs, showTimeLabel = true, showTitle = !isLandscape,
+                    colorByValue = true,
                     onViewportChange = { viewport = it }, onScrub = { scrubberMs = it },
                     modifier = Modifier.fillMaxSize()
                 )
