@@ -78,3 +78,19 @@ You can back it up by enabling Android backup or by using ADB:
 ```
 adb pull /data/data/com.thermolog/databases/thermolog.db
 ```
+
+---
+
+## 8. Back up / restore to Google Drive
+
+From the home screen tap the **⋮ menu** (top-right):
+
+- **Back up to Drive…** — writes a `thermolog-backup-<date>.json` file. In the
+  system "Save to" dialog, choose **Google Drive** (or Files, Dropbox, etc.).
+  The file contains every sensor and all stored readings.
+- **Restore from Drive…** — opens the system file picker; navigate to Google
+  Drive and select a backup `.json`. Restore **merges** the data: any readings
+  not already on the phone are added, and nothing existing is deleted.
+
+Because it uses Android's built-in document picker, no Google account setup or
+API keys are required — any cloud provider that appears in the picker works.

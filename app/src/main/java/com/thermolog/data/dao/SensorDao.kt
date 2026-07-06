@@ -9,6 +9,12 @@ interface SensorDao {
     @Query("SELECT * FROM sensors ORDER BY alias, name")
     fun getAllFlow(): Flow<List<Sensor>>
 
+    @Query("SELECT * FROM sensors")
+    suspend fun getAllOnce(): List<Sensor>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIfAbsent(sensors: List<Sensor>): List<Long>
+
     @Query("SELECT * FROM sensors WHERE address = :address")
     suspend fun getByAddress(address: String): Sensor?
 

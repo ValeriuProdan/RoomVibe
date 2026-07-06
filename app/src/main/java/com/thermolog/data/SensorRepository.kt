@@ -2,6 +2,7 @@ package com.thermolog.data
 
 import android.bluetooth.BluetoothManager
 import android.content.Context
+import android.net.Uri
 import android.util.Log
 import com.thermolog.ble.BleScanner
 import com.thermolog.ble.FoundDevice
@@ -17,8 +18,6 @@ private const val TAG = "SensorRepository"
 // Cap how many history records to pull per sync. The device only retains ~3700
 // (a few months); this is a safety ceiling. Each sync resumes where the last stopped.
 private const val MAX_HISTORY_PER_SYNC = 10_000
-
-private fun ByteArray.toHex(): String = joinToString(" ") { "%02x".format(it) }
 
 sealed class SyncState {
     data object Idle : SyncState()
@@ -59,6 +58,37 @@ class SensorRepository(private val context: Context) {
     suspend fun oldestReadingMs(address: String): Long? = readingDao.getOldestTimestampMs(address)
     suspend fun newestReadingMs(address: String): Long? = readingDao.getNewestTimestampMs(address)
     suspend fun readingCount(address: String): Int = readingDao.getCount(address)
+
+    // ── Backup / restore ──────────────────────────────────────────────────────
+
+    data class RestoreStats(val sensorsAdded: Int, val readingsAdded: Int, val readingsTotal: Int)
+
+    /** Serialize all sensors + readings and write them to the picked document. */
+    suspend fun backupTo(uri: Uri): Int = withContext(Dispatchers.IO) {
+        val sensors = sensorDao.getAllOnce()
+        val readings = readingDao.getAllOnce()
+        val json = BackupSerializer.toJson(sensors, readings)
+        context.contentResolver.openOutputStream(uri)
+            ?.use { it.write(json.toByteArray(Charsets.UTF_8)) }
+            ?: throw IllegalStateException("Could not open the selected file for writing")
+        readings.size
+    }
+
+    /** Read a backup document and merge it into the database (no existing data is lost). */
+    suspend fun restoreFrom(uri: Uri): RestoreStats = withContext(Dispatchers.IO) {
+        val json = context.contentResolver.openInputStream(uri)
+            ?.use { it.readBytes().toString(Charsets.UTF_8) }
+            ?: throw IllegalStateException("Could not open the selected file for reading")
+
+        val parsed = BackupSerializer.fromJson(json)
+        // Insert sensors that don't exist yet (keeps current aliases/sync state).
+        val sensorsAdded = sensorDao.insertIfAbsent(parsed.sensors).count { it >= 0 }
+        // Readings de-dup on the (sensorAddress, timestampMs) unique index.
+        val readingsAdded = parsed.readings
+            .chunked(2000)
+            .sumOf { chunk -> readingDao.insertAll(chunk).count { it > 0 } }
+        RestoreStats(sensorsAdded, readingsAdded, parsed.readings.size)
+    }
 
     // ── BLE scan ─────────────────────────────────────────────────────────────
 
@@ -128,12 +158,10 @@ class SensorRepository(private val context: Context) {
         val deviceNowSec = LywsdProtocol.parseDeviceTimeSec(deviceTimeBytes)
         val realNowSec = System.currentTimeMillis() / 1000L
         val offsetSec = if (deviceNowSec != null && deviceNowSec > 0) realNowSec - deviceNowSec else 0L
-        Log.d(TAG, "TIME raw=${deviceTimeBytes?.toHex()} deviceNow=$deviceNowSec offset=$offsetSec")
 
         // 2b. Ring-buffer bookkeeping: lifetimeCounter = next index, storedCount = retained.
         emit(SyncState.Progress("Checking stored history…"))
         val numRecBytes = conn.read(LywsdProtocol.SERVICE, LywsdProtocol.NUM_RECORDS_CHAR)
-        Log.d(TAG, "RAW NUM_RECORDS = ${numRecBytes?.toHex()}")
         val lifetimeCounter = LywsdProtocol.parseLifetimeCounter(numRecBytes)
         val storedCount = LywsdProtocol.parseStoredCount(numRecBytes)
         val newestIndex = lifetimeCounter - 1
@@ -143,8 +171,6 @@ class SensorRepository(private val context: Context) {
         val resumeFrom = ((sensor?.lastHistoryIndex ?: -1) + 1).coerceAtLeast(0)
         val startIdx = maxOf(resumeFrom, oldestAvailable)
         val expected = (newestIndex - startIdx + 1).coerceAtLeast(0).coerceAtMost(MAX_HISTORY_PER_SYNC)
-        Log.d(TAG, "Device $address: lifetime=$lifetimeCounter stored=$storedCount " +
-            "oldest=$oldestAvailable newest=$newestIndex resumeFrom=$resumeFrom startIdx=$startIdx expected=$expected")
 
         var maxIndexSeen = sensor?.lastHistoryIndex ?: -1
 

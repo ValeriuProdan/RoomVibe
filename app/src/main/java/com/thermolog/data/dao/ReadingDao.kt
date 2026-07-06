@@ -18,6 +18,9 @@ interface ReadingDao {
     @Query("SELECT * FROM readings WHERE sensorAddress = :address ORDER BY timestampMs ASC")
     fun getAllForSensor(address: String): Flow<List<Reading>>
 
+    @Query("SELECT * FROM readings")
+    suspend fun getAllOnce(): List<Reading>
+
     @Query(
         "SELECT MIN(timestampMs) FROM readings WHERE sensorAddress = :address"
     )

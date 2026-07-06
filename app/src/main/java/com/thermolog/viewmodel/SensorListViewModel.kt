@@ -24,6 +24,8 @@ data class SensorListUiState(
     val isScanning: Boolean = false,
     val syncStates: Map<String, SyncState> = emptyMap(),
     val liveTemps: Map<String, TempProbe> = emptyMap(),
+    val backupBusy: Boolean = false,
+    val infoMessage: String? = null,
     val errorMessage: String? = null
 )
 
@@ -100,5 +102,38 @@ class SensorListViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    fun backupTo(uri: android.net.Uri) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(backupBusy = true) }
+            try {
+                val n = repo.backupTo(uri)
+                _uiState.update { it.copy(infoMessage = "Backed up $n readings. Choose Google Drive in the save dialog to store it there.") }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(errorMessage = "Backup failed: ${e.message}") }
+            } finally {
+                _uiState.update { it.copy(backupBusy = false) }
+            }
+        }
+    }
+
+    fun restoreFrom(uri: android.net.Uri) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(backupBusy = true) }
+            try {
+                val s = repo.restoreFrom(uri)
+                _uiState.update {
+                    it.copy(infoMessage = "Restored: ${s.readingsAdded} new readings added" +
+                        (if (s.sensorsAdded > 0) ", ${s.sensorsAdded} new sensor(s)" else "") +
+                        " (${s.readingsTotal} in backup).")
+                }
+            } catch (e: Exception) {
+                _uiState.update { it.copy(errorMessage = "Restore failed: ${e.message}") }
+            } finally {
+                _uiState.update { it.copy(backupBusy = false) }
+            }
+        }
+    }
+
     fun clearError() = _uiState.update { it.copy(errorMessage = null) }
+    fun clearInfo() = _uiState.update { it.copy(infoMessage = null) }
 }

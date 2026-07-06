@@ -16,6 +16,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.thermolog.ble.FoundDevice
 import com.thermolog.data.SyncState
@@ -34,6 +35,7 @@ fun SensorListScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     var showScanSheet by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<Sensor?>(null) }
+    var menuOpen by remember { mutableStateOf(false) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -42,6 +44,21 @@ fun SensorListScreen(
             showScanSheet = true
             viewModel.scanForDevices()
         }
+    }
+
+    // "Save to…" — the dialog includes Google Drive as a destination
+    val backupLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/json")
+    ) { uri -> uri?.let { viewModel.backupTo(it) } }
+
+    // "Open…" — pick a previously saved backup (e.g. from Google Drive)
+    val restoreLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri -> uri?.let { viewModel.restoreFrom(it) } }
+
+    fun defaultBackupName(): String {
+        val stamp = SimpleDateFormat("yyyyMMdd-HHmm", Locale.US).format(Date())
+        return "thermolog-backup-$stamp.json"
     }
 
     fun requestPermissionsAndScan() {
@@ -65,6 +82,32 @@ fun SensorListScreen(
                     IconButton(onClick = { requestPermissionsAndScan() }) {
                         Icon(Icons.Default.Add, "Add sensor",
                             tint = MaterialTheme.colorScheme.onPrimary)
+                    }
+                    Box {
+                        IconButton(onClick = { menuOpen = true }) {
+                            Icon(Icons.Default.MoreVert, "More",
+                                tint = MaterialTheme.colorScheme.onPrimary)
+                        }
+                        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                            DropdownMenuItem(
+                                text = { Text("Back up to Drive…") },
+                                leadingIcon = { Icon(Icons.Default.CloudUpload, null) },
+                                enabled = !state.backupBusy,
+                                onClick = {
+                                    menuOpen = false
+                                    backupLauncher.launch(defaultBackupName())
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Restore from Drive…") },
+                                leadingIcon = { Icon(Icons.Default.CloudDownload, null) },
+                                enabled = !state.backupBusy,
+                                onClick = {
+                                    menuOpen = false
+                                    restoreLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
+                                }
+                            )
+                        }
                     }
                 }
             )
@@ -137,6 +180,27 @@ fun SensorListScreen(
             title = { Text("Error") },
             text = { Text(msg) }
         )
+    }
+
+    state.infoMessage?.let { msg ->
+        AlertDialog(
+            onDismissRequest = { viewModel.clearInfo() },
+            confirmButton = { TextButton(onClick = { viewModel.clearInfo() }) { Text("OK") } },
+            title = { Text("Done") },
+            text = { Text(msg) }
+        )
+    }
+
+    if (state.backupBusy) {
+        Dialog(onDismissRequest = {}) {
+            Surface(shape = MaterialTheme.shapes.medium, tonalElevation = 6.dp) {
+                Row(Modifier.padding(24.dp), verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(Modifier.size(22.dp), strokeWidth = 2.dp)
+                    Spacer(Modifier.width(16.dp))
+                    Text("Working…")
+                }
+            }
+        }
     }
 }
 
