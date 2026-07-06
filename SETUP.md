@@ -1,5 +1,9 @@
 # RoomVibe – Setup Guide
 
+> **Just want to use the app?** You don't need to build it — download the ready-made
+> APK from the [latest release](https://github.com/ValeriuProdan/ThermoLog/releases/latest)
+> and install it on your phone. The steps below are for building from source.
+
 ## 1. Open in Android Studio
 
 File → Open → select the `ThermoLog` folder. Android Studio will sync Gradle automatically.
