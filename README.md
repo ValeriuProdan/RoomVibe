@@ -48,9 +48,17 @@ even when you're away from home.
 
 ## Compatibility
 
+<p align="center">
+  <a href="https://www.mi.com/uk/item/3204500023">
+    <img src="docs/sensor.png" width="130" alt="Xiaomi Mi Temperature and Humidity Monitor 2" />
+  </a>
+</p>
+
 - Android **8.0+** (API 26) with Bluetooth LE.
-- Xiaomi **LYWSD03MMC** and other Mijia thermometers that expose the classic
-  `ebe0ccb0` history service. Devices flashed with the open-source
+- Xiaomi **LYWSD03MMC** — the
+  [Mi Temperature and Humidity Monitor 2](https://www.mi.com/uk/item/3204500023)
+  — and other Mijia thermometers that expose the classic `ebe0ccb0` history
+  service. Devices flashed with the open-source
   [pvvx firmware](https://pvvx.github.io/ATC_MiThermometer/) (`ATC_*`) also work.
 
 See **[SETUP.md](SETUP.md)** for detailed setup, pairing, and firmware notes.
