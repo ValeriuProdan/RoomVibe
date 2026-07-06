@@ -30,6 +30,7 @@ import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 private const val HOUR = 3_600_000L
 private const val DAY = 24 * HOUR
@@ -313,15 +314,58 @@ private fun applyTransform(
 
 // ── Drawing helpers ───────────────────────────────────────────────────────
 
-/** Smooth curve through points using horizontal-tangent cubic segments. */
+/**
+ * Smooth curve through points using a monotone cubic Hermite spline
+ * (Fritsch–Carlson). Unlike a plain cubic it never overshoots or wiggles
+ * between samples — where the data is monotone, so is the curve.
+ */
 private fun smoothPath(pts: List<Offset>): Path {
     val path = Path()
-    if (pts.isEmpty()) return path
+    val n = pts.size
+    if (n == 0) return path
     path.moveTo(pts[0].x, pts[0].y)
-    for (i in 1 until pts.size) {
-        val p0 = pts[i - 1]; val p1 = pts[i]
-        val midX = (p0.x + p1.x) / 2f
-        path.cubicTo(midX, p0.y, midX, p1.y, p1.x, p1.y)
+    if (n == 1) return path
+    if (n == 2) { path.lineTo(pts[1].x, pts[1].y); return path }
+
+    val dx = FloatArray(n - 1)
+    val slope = FloatArray(n - 1)
+    for (i in 0 until n - 1) {
+        dx[i] = pts[i + 1].x - pts[i].x
+        slope[i] = if (dx[i] != 0f) (pts[i + 1].y - pts[i].y) / dx[i] else 0f
+    }
+
+    // Initial tangents: average of neighbouring secants, flat at local extrema
+    val m = FloatArray(n)
+    m[0] = slope[0]
+    m[n - 1] = slope[n - 2]
+    for (i in 1 until n - 1) {
+        m[i] = if (slope[i - 1] * slope[i] <= 0f) 0f else (slope[i - 1] + slope[i]) / 2f
+    }
+
+    // Constrain tangents so each segment stays monotone (no overshoot)
+    for (i in 0 until n - 1) {
+        if (slope[i] == 0f) {
+            m[i] = 0f; m[i + 1] = 0f
+        } else {
+            val a = m[i] / slope[i]
+            val b = m[i + 1] / slope[i]
+            val s = a * a + b * b
+            if (s > 9f) {
+                val t = 3f / sqrt(s)
+                m[i] = t * a * slope[i]
+                m[i + 1] = t * b * slope[i]
+            }
+        }
+    }
+
+    // Emit each segment as a cubic Bézier from the Hermite tangents
+    for (i in 0 until n - 1) {
+        val d = dx[i]
+        path.cubicTo(
+            pts[i].x + d / 3f, pts[i].y + m[i] * d / 3f,
+            pts[i + 1].x - d / 3f, pts[i + 1].y - m[i + 1] * d / 3f,
+            pts[i + 1].x, pts[i + 1].y
+        )
     }
     return path
 }
