@@ -1,7 +1,11 @@
 package com.thermolog.ui
 
 import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
@@ -10,21 +14,32 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material.icons.outlined.HelpOutline
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.thermolog.ble.FoundDevice
 import com.thermolog.data.SyncState
 import com.thermolog.data.entity.Sensor
 import com.thermolog.viewmodel.SensorListViewModel
 import com.thermolog.viewmodel.TempProbe
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
+
+private fun requiredBlePermissions(): Array<String> =
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
+    } else {
+        arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+    }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -33,17 +48,36 @@ fun SensorListScreen(
     onOpenSensor: (String) -> Unit
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val context = LocalContext.current
     var showScanSheet by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<Sensor?>(null) }
     var menuOpen by remember { mutableStateOf(false) }
+    var showRationale by remember { mutableStateOf(false) }
+    var showDeniedSettings by remember { mutableStateOf(false) }
+
+    fun hasBlePermissions(): Boolean = requiredBlePermissions().all {
+        ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+    }
+
+    fun startScanning() {
+        showScanSheet = true
+        viewModel.scanForDevices()
+    }
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { granted ->
         if (granted.values.all { it }) {
-            showScanSheet = true
-            viewModel.scanForDevices()
+            startScanning()
+        } else {
+            // Denied — offer to enable it from system settings
+            showDeniedSettings = true
         }
+    }
+
+    // Tapping + : if we already have permission, scan; otherwise explain first
+    fun onAddClicked() {
+        if (hasBlePermissions()) startScanning() else showRationale = true
     }
 
     // "Save to…" — the dialog includes Google Drive as a destination
@@ -61,15 +95,6 @@ fun SensorListScreen(
         return "thermolog-backup-$stamp.json"
     }
 
-    fun requestPermissionsAndScan() {
-        val perms = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
-        } else {
-            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
-        }
-        permissionLauncher.launch(perms)
-    }
-
     Scaffold(
         topBar = {
             TopAppBar(
@@ -79,10 +104,6 @@ fun SensorListScreen(
                     titleContentColor = MaterialTheme.colorScheme.onPrimary
                 ),
                 actions = {
-                    IconButton(onClick = { requestPermissionsAndScan() }) {
-                        Icon(Icons.Default.Add, "Add sensor",
-                            tint = MaterialTheme.colorScheme.onPrimary)
-                    }
                     Box {
                         IconButton(onClick = { menuOpen = true }) {
                             Icon(Icons.Default.MoreVert, "More",
@@ -111,6 +132,15 @@ fun SensorListScreen(
                     }
                 }
             )
+        },
+        floatingActionButton = {
+            FloatingActionButton(
+                onClick = { onAddClicked() },
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary
+            ) {
+                Icon(Icons.Default.Add, "Add sensor")
+            }
         }
     ) { pad ->
         LazyColumn(
@@ -170,6 +200,58 @@ fun SensorListScreen(
                 renameTarget = null
             },
             onDismiss = { renameTarget = null }
+        )
+    }
+
+    // Explain why we need Bluetooth/nearby permission, then request it
+    if (showRationale) {
+        val needsLocation = Build.VERSION.SDK_INT < Build.VERSION_CODES.S
+        AlertDialog(
+            onDismissRequest = { showRationale = false },
+            icon = { Icon(Icons.Default.Bluetooth, null) },
+            title = { Text("Bluetooth permission needed") },
+            text = {
+                Text(
+                    if (needsLocation)
+                        "To find your sensors over Bluetooth, Android needs the Location " +
+                        "permission for BLE scanning. ThermoLog never uses or stores your location."
+                    else
+                        "ThermoLog needs the “Nearby devices” permission to scan for and connect " +
+                        "to your Xiaomi sensors over Bluetooth. It is only used to talk to the sensors."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showRationale = false
+                    permissionLauncher.launch(requiredBlePermissions())
+                }) { Text("Continue") }
+            },
+            dismissButton = { TextButton(onClick = { showRationale = false }) { Text("Cancel") } }
+        )
+    }
+
+    // Permission was denied — guide the user to enable it in system settings
+    if (showDeniedSettings) {
+        AlertDialog(
+            onDismissRequest = { showDeniedSettings = false },
+            icon = { Icon(Icons.Default.Warning, null) },
+            title = { Text("Permission required") },
+            text = {
+                Text(
+                    "Without Bluetooth permission ThermoLog can't find your sensors. " +
+                    "You can enable it in Settings → Permissions."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDeniedSettings = false
+                    context.startActivity(
+                        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            Uri.fromParts("package", context.packageName, null))
+                    )
+                }) { Text("Open Settings") }
+            },
+            dismissButton = { TextButton(onClick = { showDeniedSettings = false }) { Text("Not now") } }
         )
     }
 
@@ -288,6 +370,50 @@ private fun SensorCard(
     }
 }
 
+/** Tappable / hoverable help that explains the most common "can't find it" cause. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun NotFindingDeviceHelp() {
+    val tooltipState = rememberTooltipState(isPersistent = true)
+    val scope = rememberCoroutineScope()
+
+    TooltipBox(
+        positionProvider = TooltipDefaults.rememberRichTooltipPositionProvider(),
+        state = tooltipState,
+        tooltip = {
+            RichTooltip(
+                title = { Text("Not finding your device?") },
+                action = {
+                    TextButton(onClick = { scope.launch { tooltipState.dismiss() } }) { Text("Got it") }
+                }
+            ) {
+                Text(
+                    "A sensor can only talk to one app at a time. If the official Xiaomi " +
+                    "app (Mi Home / Xiaomi Home) is running, it holds the Bluetooth " +
+                    "connection and ThermoLog can't reach the sensor.\n\n" +
+                    "Fix: close and force-stop the Xiaomi app\n" +
+                    "(long-press its icon → App info → Force stop), then scan again.\n\n" +
+                    "Also make sure you're close to the sensor and its battery is OK."
+                )
+            }
+        }
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .clickable { scope.launch { tooltipState.show() } }
+                .padding(vertical = 4.dp)
+        ) {
+            Icon(Icons.Outlined.HelpOutline, null, Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(4.dp))
+            Text("Not finding your device?",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.primary)
+        }
+    }
+}
+
 @Composable
 private fun ScanSheet(
     isScanning: Boolean,
@@ -316,6 +442,9 @@ private fun ScanSheet(
                 Text("Scan again")
             }
         }
+
+        NotFindingDeviceHelp()
+
         Spacer(Modifier.height(8.dp))
         if (isScanning) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {

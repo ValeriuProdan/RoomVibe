@@ -36,7 +36,7 @@ private const val DAY = 24 * HOUR
 
 private const val PAD_L = 12f
 private const val PAD_R = 52f
-private const val PAD_T = 26f
+private const val PAD_T = 34f   // header band: title (left) + scrubber date (right)
 private const val PAD_B = 26f
 
 enum class Metric { TEMP, HUMIDITY }
@@ -114,7 +114,7 @@ fun MetricChart(
                 // Lower ~40% of the plot area pans; upper part scrubs.
                 val plotTop = PAD_T
                 val plotBottom = size.height - PAD_B
-                val panZoneTop = plotTop + (plotBottom - plotTop) * 0.6f
+                val panZoneTop = plotTop + (plotBottom - plotTop) * 0.8f
                 val panMode = first.position.y > panZoneTop
 
                 if (!panMode) scrubAt(first.position.x, size.width, vpState.value, onScrubState.value)
@@ -160,9 +160,9 @@ fun MetricChart(
         val lod = lodFor(viewport.span)
         val points = buildPoints(readings, viewport.startMs, viewport.endMs, lod, metric)
 
-        // Title
+        // Title (left of the header band)
         drawText(textMeasurer.measure(title, TextStyle(fontSize = 13.sp, color = titleColor,
-            fontWeight = FontWeight.SemiBold)), topLeft = Offset(PAD_L, 2f))
+            fontWeight = FontWeight.SemiBold)), topLeft = Offset(PAD_L, 4f))
 
         if (points.isEmpty()) {
             drawText(textMeasurer.measure("No data in range", axisLabel),
@@ -212,7 +212,7 @@ fun MetricChart(
         }
 
         // Subtle hint marking the lower pan zone
-        val panZoneTop = PAD_T + h * 0.6f
+        val panZoneTop = PAD_T + h * 0.8f
         drawLine(Color(0x10FFFFFF), Offset(PAD_L, panZoneTop), Offset(PAD_L + w, panZoneTop), 1f,
             pathEffect = PathEffect.dashPathEffect(floatArrayOf(3f, 7f)))
         val hint = textMeasurer.measure("⇄ drag here to scroll through time",
@@ -257,9 +257,11 @@ fun MetricChart(
 
                 if (showTimeLabel) {
                     val title2 = tooltipTitle(near.bucketStart, lod)
-                    val m = textMeasurer.measure(title2, TextStyle(fontSize = 10.sp, color = Color(0xFFE8EAED)))
-                    val tx = (x - m.size.width / 2f).coerceIn(0f, size.width - m.size.width)
-                    drawText(m, topLeft = Offset(tx, 2f))
+                    val m = textMeasurer.measure(title2, TextStyle(fontSize = 11.sp, color = Color(0xFFE8EAED)))
+                    // Right-align to the plot edge (not the canvas), clear of the axis gutter
+                    val plotRight = size.width - PAD_R
+                    val tx = (plotRight - m.size.width).coerceAtLeast(PAD_L + 120f)
+                    drawText(m, topLeft = Offset(tx, 4f))
                 }
             }
         }
@@ -338,7 +340,9 @@ private fun DrawScope.drawMarker(
     val padX = 7f; val padY = 3f
     val boxW = m.size.width + padX * 2; val boxH = m.size.height + padY * 2
     val bx = (cx - boxW / 2).coerceIn(0f, size.width - boxW)
-    val by = if (above) cy - boxH - 8f else cy + 8f
+    // Keep the pill inside the plot band so it never overlaps the header title or axis labels
+    val by = (if (above) cy - boxH - 8f else cy + 8f)
+        .coerceIn(PAD_T, size.height - PAD_B - boxH)
     drawRoundRect(if (solidBg) accent else accent.copy(alpha = 0.92f),
         topLeft = Offset(bx, by), size = Size(boxW, boxH), cornerRadius = CornerRadius(boxH / 2, boxH / 2))
     drawText(m, topLeft = Offset(bx + padX, by + padY))
