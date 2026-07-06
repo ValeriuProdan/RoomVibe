@@ -38,7 +38,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.thermolog.R
 import com.thermolog.ble.FoundDevice
 import com.thermolog.ble.LywsdProtocol
+import com.thermolog.data.AppSettings
 import com.thermolog.data.SyncState
+import com.thermolog.data.formatTemp
 import com.thermolog.data.entity.Sensor
 import com.thermolog.viewmodel.SensorListViewModel
 import com.thermolog.viewmodel.TempProbe
@@ -65,6 +67,8 @@ fun SensorListScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val settings = remember { AppSettings.get(context) }
+    val fahrenheit by settings.fahrenheit.collectAsStateWithLifecycle()
     var showScanSheet by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<Sensor?>(null) }
     var menuOpen by remember { mutableStateOf(false) }
@@ -148,6 +152,15 @@ fun SensorListScreen(
                                 onClick = {
                                     menuOpen = false
                                     restoreLauncher.launch(arrayOf("application/json", "text/plain", "*/*"))
+                                }
+                            )
+                            HorizontalDivider()
+                            DropdownMenuItem(
+                                text = { Text(if (fahrenheit) "Show in °C" else "Show in °F") },
+                                leadingIcon = { Icon(Icons.Default.Thermostat, null) },
+                                onClick = {
+                                    settings.setFahrenheit(!fahrenheit)
+                                    menuOpen = false
                                 }
                             )
                         }
@@ -545,6 +558,7 @@ private fun DeviceRow(
     probe: TempProbe?,
     onAdd: (FoundDevice) -> Unit
 ) {
+    val fahrenheit by AppSettings.get(LocalContext.current).fahrenheit.collectAsStateWithLifecycle()
     ListItem(
         headlineContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -553,7 +567,7 @@ private fun DeviceRow(
                     Spacer(Modifier.width(8.dp))
                     Surface(color = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f),
                         shape = MaterialTheme.shapes.small) {
-                        Text("%.1f°C now".format(probe.celsius),
+                        Text(formatTemp(probe.celsius, fahrenheit) + " now",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp))

@@ -55,15 +55,18 @@ fun zoomLabel(span: Long): String = when (lodFor(span)) {
     Lod.MONTHLY -> "Monthly"
 }
 
-// Temperature → colour ramp: cold = blue, hot = red, with shades between.
+// Temperature → colour ramp anchored to human thermal comfort (ASHRAE ~20–25 °C
+// comfort zone): green through the comfortable band, blue when cold, red when hot.
 private val TEMP_STOPS = listOf(
-    -5f to Color(0xFF1E6FE0),   // deep blue
-    5f to Color(0xFF2E9BF0),    // blue
-    12f to Color(0xFF20C4C9),   // cyan
-    18f to Color(0xFF4CAF50),   // green
-    23f to Color(0xFFF4C020),   // amber
-    28f to Color(0xFFFF7A1A),   // orange
-    34f to Color(0xFFE53935)    // red
+    0f to Color(0xFF1565C0),    // very cold — deep blue
+    8f to Color(0xFF2196F3),    // cold — blue
+    14f to Color(0xFF26C6DA),   // cool — cyan
+    18f to Color(0xFF66BB6A),   // slightly cool — light green
+    20f to Color(0xFF43A047),   // comfortable — green
+    25f to Color(0xFF43A047),   // comfortable — green
+    28f to Color(0xFFF4C020),   // warm — amber
+    31f to Color(0xFFFF7A1A),   // hot — orange
+    36f to Color(0xFFE53935)    // very hot — red
 )
 
 // Humidity → comfort ramp: green at the ideal (~48%), shading to red at both
@@ -124,6 +127,7 @@ fun MetricChart(
     showTimeLabel: Boolean,
     showTitle: Boolean = true,
     colorByValue: Boolean = false,
+    fahrenheit: Boolean = false,
     onViewportChange: (Viewport) -> Unit,
     onScrub: (Long?) -> Unit,
     modifier: Modifier = Modifier
@@ -204,6 +208,10 @@ fun MetricChart(
         val lod = lodFor(viewport.span)
         val points = buildPoints(readings, viewport.startMs, viewport.endMs, lod, metric)
 
+        // Convert a stored value to the displayed number (°F when requested).
+        // Colours still use the raw Celsius value, so the ramp is unit-independent.
+        fun disp(v: Float): Float = if (fahrenheit) v * 9f / 5f + 32f else v
+
         // Title (left of the header band); hidden in landscape where the toggle names it
         if (showTitle) {
             drawText(textMeasurer.measure(title, TextStyle(fontSize = 13.sp, color = titleColor,
@@ -230,7 +238,7 @@ fun MetricChart(
             val y = PAD_T + h - frac * h
             drawLine(gridColor, Offset(PAD_L, y), Offset(PAD_L + w, y), 1f, pathEffect = dash)
             val v = lo + frac * range
-            val lbl = textMeasurer.measure("%.0f%s".format(v, unit), axisLabel)
+            val lbl = textMeasurer.measure("%.0f%s".format(disp(v), unit), axisLabel)
             drawText(lbl, topLeft = Offset(PAD_L + w + 8f, y - lbl.size.height / 2))
         }
 
@@ -294,18 +302,18 @@ fun MetricChart(
             TextStyle(fontSize = 9.sp, color = Color(0x44FFFFFF)))
         drawText(hint, topLeft = Offset(PAD_L + (w - hint.size.width) / 2f, PAD_T + h - hint.size.height - 2f))
 
-§        // Min & max pills — placed on the actual plotted line (midpoint in hourly,
+        // Min & max pills — placed on the actual plotted line (midpoint in hourly,
         // the hi/lo envelope in daily/monthly)
         if (lod == Lod.HOURLY) {
             val maxP = points.maxByOrNull { it.mid }!!
             val minP = points.minByOrNull { it.mid }!!
-            drawMarker(textMeasurer, xOf(maxP.tMs), yOf(maxP.mid), "%.1f".format(maxP.mid), colorAt(maxP.mid), above = true)
-            drawMarker(textMeasurer, xOf(minP.tMs), yOf(minP.mid), "%.1f".format(minP.mid), colorAt(minP.mid), above = false)
+            drawMarker(textMeasurer, xOf(maxP.tMs), yOf(maxP.mid), "%.1f".format(disp(maxP.mid)), colorAt(maxP.mid), above = true)
+            drawMarker(textMeasurer, xOf(minP.tMs), yOf(minP.mid), "%.1f".format(disp(minP.mid)), colorAt(minP.mid), above = false)
         } else {
             val maxP = points.maxByOrNull { it.hi }!!
             val minP = points.minByOrNull { it.lo }!!
-            drawMarker(textMeasurer, xOf(maxP.tMs), yOf(maxP.hi), "%.1f".format(maxP.hi), colorAt(maxP.hi), above = true)
-            drawMarker(textMeasurer, xOf(minP.tMs), yOf(minP.lo), "%.1f".format(minP.lo), colorAt(minP.lo), above = false)
+            drawMarker(textMeasurer, xOf(maxP.tMs), yOf(maxP.hi), "%.1f".format(disp(maxP.hi)), colorAt(maxP.hi), above = true)
+            drawMarker(textMeasurer, xOf(minP.tMs), yOf(minP.lo), "%.1f".format(disp(minP.lo)), colorAt(minP.lo), above = false)
         }
 
         // X-axis time labels
@@ -334,8 +342,8 @@ fun MetricChart(
                     drawScrubDot(x, yOf(near.lo), colorAt(near.lo))
                 }
 
-                val valStr = if (lod == Lod.HOURLY) "%.1f%s".format(near.mid, unit)
-                             else "%.1f–%.1f%s".format(near.lo, near.hi, unit)
+                val valStr = if (lod == Lod.HOURLY) "%.1f%s".format(disp(near.mid), unit)
+                             else "%.1f–%.1f%s".format(disp(near.lo), disp(near.hi), unit)
                 val pillColor = if (lod == Lod.HOURLY) colorAt(near.mid) else colorAt(near.hi)
                 drawMarker(textMeasurer, x, PAD_T + 2f, valStr, pillColor, above = false, solidBg = true)
 

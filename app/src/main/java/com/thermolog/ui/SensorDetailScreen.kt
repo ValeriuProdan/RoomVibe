@@ -19,11 +19,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.thermolog.data.AppSettings
+import com.thermolog.data.formatTemp
 import com.thermolog.data.entity.Reading
 import com.thermolog.ui.chart.Metric
 import com.thermolog.ui.chart.MetricChart
@@ -58,6 +61,8 @@ fun SensorDetailScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val context = LocalContext.current
+    val fahrenheit by AppSettings.get(context).fahrenheit.collectAsStateWithLifecycle()
     var showGattExplorer by remember { mutableStateOf(false) }
     // rememberSaveable so zoom/pan and the scrubber survive rotation
     var viewport by rememberSaveable(stateSaver = ViewportSaver) { mutableStateOf<Viewport?>(null) }
@@ -130,7 +135,7 @@ fun SensorDetailScreen(
                     title = "Temperature", unit = "°", metric = Metric.TEMP,
                     accent = TempAccent, readings = state.readings, viewport = vp ?: Viewport(0, 1),
                     scrubberMs = scrubberMs, showTimeLabel = true, showTitle = !isLandscape,
-                    colorByValue = true,
+                    colorByValue = true, fahrenheit = fahrenheit,
                     onViewportChange = { viewport = it }, onScrub = { scrubberMs = it },
                     modifier = Modifier.fillMaxSize()
                 )
@@ -199,7 +204,7 @@ fun SensorDetailScreen(
         ) {
             Spacer(Modifier.height(10.dp))
 
-            CurrentReadingHeader(state.latest, state.newestMs)
+            CurrentReadingHeader(state.latest, state.newestMs, fahrenheit)
 
             Text(
                 state.sensorAddress,
@@ -300,7 +305,7 @@ private fun ChartCard(modifier: Modifier = Modifier, content: @Composable BoxSco
 }
 
 @Composable
-private fun CurrentReadingHeader(latest: Reading?, newestMs: Long?) {
+private fun CurrentReadingHeader(latest: Reading?, newestMs: Long?, fahrenheit: Boolean) {
     Surface(shape = RoundedCornerShape(16.dp), color = CardBg, modifier = Modifier.fillMaxWidth()) {
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 18.dp, vertical = 14.dp),
@@ -310,7 +315,7 @@ private fun CurrentReadingHeader(latest: Reading?, newestMs: Long?) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.Thermostat, null, tint = TempAccent)
                 Spacer(Modifier.width(6.dp))
-                Text(latest?.let { "%.1f°C".format(it.temperatureCelsius) } ?: "—",
+                Text(latest?.let { formatTemp(it.temperatureCelsius, fahrenheit) } ?: "—",
                     style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold, color = TextHi)
             }
             Row(verticalAlignment = Alignment.CenterVertically) {
