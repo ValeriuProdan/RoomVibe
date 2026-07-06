@@ -207,6 +207,7 @@ fun SensorListScreen(
                     syncState = state.syncStates[sensor.address],
                     onClick = { onOpenSensor(sensor.address) },
                     onSync = { viewModel.syncSensor(sensor.address) },
+                    onCancelSync = { viewModel.cancelSync(sensor.address) },
                     onRename = { renameTarget = sensor },
                     onDelete = { viewModel.removeSensor(sensor) }
                 )
@@ -350,6 +351,7 @@ private fun SensorCard(
     syncState: SyncState?,
     onClick: () -> Unit,
     onSync: () -> Unit,
+    onCancelSync: () -> Unit,
     onRename: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -386,12 +388,19 @@ private fun SensorCard(
                     Icon(Icons.Default.MoreVert, "Options")
                 }
                 DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                    DropdownMenuItem(
-                        text = { Text("Sync now") },
-                        leadingIcon = { Icon(Icons.Default.Sync, null) },
-                        enabled = !syncing,
-                        onClick = { expanded = false; onSync() }
-                    )
+                    if (syncing) {
+                        DropdownMenuItem(
+                            text = { Text("Cancel sync") },
+                            leadingIcon = { Icon(Icons.Default.Close, null) },
+                            onClick = { expanded = false; onCancelSync() }
+                        )
+                    } else {
+                        DropdownMenuItem(
+                            text = { Text("Sync now") },
+                            leadingIcon = { Icon(Icons.Default.Sync, null) },
+                            onClick = { expanded = false; onSync() }
+                        )
+                    }
                     DropdownMenuItem(
                         text = { Text("Rename") },
                         leadingIcon = { Icon(Icons.Default.Edit, null) },

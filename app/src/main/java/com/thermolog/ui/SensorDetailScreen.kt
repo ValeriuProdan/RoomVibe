@@ -108,11 +108,9 @@ fun SensorDetailScreen(
                     ),
                     actions = {
                         if (state.isRefreshing) {
-                            CircularProgressIndicator(
-                                Modifier.size(22.dp).padding(end = 4.dp),
-                                strokeWidth = 2.dp, color = Color.White
-                            )
-                            Spacer(Modifier.width(8.dp))
+                            IconButton(onClick = { viewModel.cancelRefresh() }) {
+                                Icon(Icons.Default.Close, "Cancel sync")
+                            }
                         } else {
                             IconButton(onClick = { viewModel.refresh() }) {
                                 Icon(Icons.Default.Refresh, "Refresh")
@@ -158,14 +156,14 @@ fun SensorDetailScreen(
             // Maximise the chart: one metric at a time, filling the whole body,
             // with the back arrow + metric toggle floating on top of it.
             Box(Modifier.padding(pad).fillMaxSize().background(ScreenBg)) {
-                if (state.isLoading || vp == null) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-                    }
-                } else if (landscapeMetric == 0) {
-                    tempChart(Modifier.fillMaxSize().padding(4.dp))
-                } else {
-                    humidChart(Modifier.fillMaxSize().padding(4.dp))
+                when {
+                    vp != null && landscapeMetric == 0 -> tempChart(Modifier.fillMaxSize().padding(4.dp))
+                    vp != null -> humidChart(Modifier.fillMaxSize().padding(4.dp))
+                    state.isLoading || state.isRefreshing ->
+                        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                            CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                        }
+                    else -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { NoDataMessage() }
                 }
 
                 // Floating controls (top-left), clear of any display cutout
@@ -186,13 +184,21 @@ fun SensorDetailScreen(
                         }
                         MetricToggle(selected = landscapeMetric, onSelect = { landscapeMetric = it })
                         if (state.isRefreshing) {
-                            CircularProgressIndicator(Modifier.size(20.dp).padding(start = 6.dp),
-                                strokeWidth = 2.dp, color = Color.White)
+                            IconButton(onClick = { viewModel.cancelRefresh() }) {
+                                Icon(Icons.Default.Close, "Cancel sync", tint = Color.White)
+                            }
                         } else {
                             IconButton(onClick = { viewModel.refresh() }) {
                                 Icon(Icons.Default.Refresh, "Refresh", tint = Color.White)
                             }
                         }
+                    }
+                }
+
+                // Sync progress (top-centre) so the counter is visible in landscape too
+                if (state.isRefreshing) {
+                    Box(Modifier.align(Alignment.TopCenter).displayCutoutPadding().padding(top = 8.dp)) {
+                        RefreshBanner(state.refreshProgress)
                     }
                 }
             }
@@ -203,6 +209,11 @@ fun SensorDetailScreen(
             Modifier.padding(pad).fillMaxSize().background(ScreenBg).padding(horizontal = 12.dp)
         ) {
             Spacer(Modifier.height(10.dp))
+
+            if (state.isRefreshing) {
+                RefreshBanner(state.refreshProgress)
+                Spacer(Modifier.height(8.dp))
+            }
 
             CurrentReadingHeader(state.latest, state.newestMs, fahrenheit)
 
@@ -237,14 +248,18 @@ fun SensorDetailScreen(
 
             Spacer(Modifier.height(6.dp))
 
-            if (state.isLoading || vp == null) {
-                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-                }
-            } else {
+            if (vp != null) {
                 tempChart(Modifier.weight(1f).fillMaxWidth())
                 Spacer(Modifier.height(8.dp))
                 humidChart(Modifier.weight(1f).fillMaxWidth())
+            } else {
+                Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    if (state.isLoading || state.isRefreshing) {
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                    } else {
+                        NoDataMessage()
+                    }
+                }
             }
 
             Text(
@@ -289,6 +304,47 @@ private fun MetricToggle(selected: Int, onSelect: (Int) -> Unit) {
                 )
             }
             if (i == 0) Spacer(Modifier.width(6.dp))
+        }
+    }
+}
+
+/** Shown when the sensor has no stored readings yet. */
+@Composable
+private fun NoDataMessage() {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.padding(24.dp)
+    ) {
+        Icon(Icons.Default.Timeline, null, Modifier.size(56.dp),
+            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.4f))
+        Text("No data yet", style = MaterialTheme.typography.titleMedium, color = TextHi)
+        Text(
+            "Tap the refresh icon at the top to sync this sensor's history.",
+            style = MaterialTheme.typography.bodySmall, color = TextLo
+        )
+    }
+}
+
+/** Small banner shown while syncing, with a spinner and the live progress/counter. */
+@Composable
+private fun RefreshBanner(progress: String?) {
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+    ) {
+        Row(
+            Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp,
+                color = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(10.dp))
+            Text(
+                progress ?: "Syncing…",
+                style = MaterialTheme.typography.labelLarge,
+                color = TextHi
+            )
         }
     }
 }

@@ -91,15 +91,22 @@ class SensorListViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { repo.renameSensor(address, alias) }
     }
 
+    private val syncJobs = mutableMapOf<String, kotlinx.coroutines.Job>()
+
     fun syncSensor(address: String) {
         if (_uiState.value.syncStates[address] is SyncState.Connecting ||
             _uiState.value.syncStates[address] is SyncState.Progress) return
 
-        viewModelScope.launch {
+        syncJobs[address] = viewModelScope.launch {
             repo.syncSensor(address).collect { state ->
                 _uiState.update { it.copy(syncStates = it.syncStates + (address to state)) }
             }
         }
+    }
+
+    fun cancelSync(address: String) {
+        syncJobs.remove(address)?.cancel()
+        _uiState.update { it.copy(syncStates = it.syncStates - address) }
     }
 
     fun backupTo(uri: android.net.Uri) {

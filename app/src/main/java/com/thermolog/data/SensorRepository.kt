@@ -120,6 +120,7 @@ class SensorRepository(private val context: Context) {
         val bleDevice = btAdapter.getRemoteDevice(address)
         val conn = GattConnection(context, bleDevice)
 
+      try {
         emit(SyncState.Connecting)
         val connected = conn.connect()
         if (!connected) {
@@ -177,7 +178,7 @@ class SensorRepository(private val context: Context) {
         // 3. Stream history records from startIdx. Records arrive as notifications;
         //    a ~5s gap with no record means the stream has finished.
         if (expected > 0) {
-            emit(SyncState.Progress("Downloading history… 0 / $expected"))
+            emit(SyncState.Progress("0 / $expected"))
 
             conn.enableNotify(LywsdProtocol.SERVICE, LywsdProtocol.HISTORY_CHAR)
             // Writing the start index triggers the device to stream from there
@@ -208,8 +209,8 @@ class SensorRepository(private val context: Context) {
                         )
                     )
                     historyCount++
-                    if (historyCount % 25 == 0) {
-                        emit(SyncState.Progress("Downloading history… $historyCount / $expected"))
+                    if (historyCount % 10 == 0) {
+                        emit(SyncState.Progress("$historyCount / $expected"))
                     }
                     if (historyCount >= MAX_HISTORY_PER_SYNC) break   // TESTING cap
                 }
@@ -228,7 +229,12 @@ class SensorRepository(private val context: Context) {
         } else {
             emit(SyncState.Done(historyInserted))
         }
+      } finally {
+        // Always release the BLE connection, including when the sync is cancelled.
+        conn.disconnect()
+      }
     }.catch { e ->
+        if (e is kotlinx.coroutines.CancellationException) throw e
         Log.e(TAG, "Sync error", e)
         emit(SyncState.Error(e.message ?: "Unknown error"))
     }

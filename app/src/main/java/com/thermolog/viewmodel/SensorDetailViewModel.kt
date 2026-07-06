@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.thermolog.data.SensorRepository
 import com.thermolog.data.SyncState
 import com.thermolog.data.entity.Reading
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 
@@ -16,6 +17,7 @@ data class SensorDetailUiState(
     val readings: List<Reading> = emptyList(),
     val isLoading: Boolean = true,
     val isRefreshing: Boolean = false,
+    val refreshProgress: String? = null,
     val refreshMessage: String? = null,
     val gattServices: List<Pair<String, List<String>>> = emptyList(),
     val isExploring: Boolean = false
@@ -52,23 +54,35 @@ class SensorDetailViewModel(
         }
     }
 
-    /** Pull-to-refresh: connect to the sensor and download any new history. */
+    private var syncJob: Job? = null
+
+    /** Connect to the sensor and download any new history. */
     fun refresh() {
         if (_uiState.value.isRefreshing) return
-        viewModelScope.launch {
-            _uiState.update { it.copy(isRefreshing = true, refreshMessage = null) }
+        syncJob = viewModelScope.launch {
+            _uiState.update { it.copy(isRefreshing = true, refreshMessage = null, refreshProgress = "Connecting…") }
             repo.syncSensor(address).collect { s ->
                 when (s) {
+                    is SyncState.Connecting -> _uiState.update { it.copy(refreshProgress = "Connecting…") }
+                    is SyncState.Progress -> _uiState.update { it.copy(refreshProgress = s.step) }
                     is SyncState.Done -> _uiState.update {
-                        it.copy(isRefreshing = false,
+                        it.copy(isRefreshing = false, refreshProgress = null,
                             refreshMessage = "Updated — ${s.newReadings} new reading(s)")
                     }
                     is SyncState.Error -> _uiState.update {
-                        it.copy(isRefreshing = false, refreshMessage = s.message)
+                        it.copy(isRefreshing = false, refreshProgress = null, refreshMessage = s.message)
                     }
-                    else -> { /* progress states: keep the spinner running */ }
+                    is SyncState.Idle -> { /* no-op */ }
                 }
             }
+        }
+    }
+
+    fun cancelRefresh() {
+        syncJob?.cancel()
+        syncJob = null
+        _uiState.update {
+            it.copy(isRefreshing = false, refreshProgress = null, refreshMessage = "Sync canceled")
         }
     }
 
