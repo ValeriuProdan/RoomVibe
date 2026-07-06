@@ -1,6 +1,10 @@
 package com.roomvibe.ui
 
+import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -25,6 +29,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.roomvibe.ble.connectPermissionsFor
 import com.roomvibe.data.AppSettings
 import com.roomvibe.data.formatTemp
 import com.roomvibe.data.entity.Reading
@@ -71,6 +76,25 @@ fun SensorDetailScreen(
     var landscapeMetric by rememberSaveable { mutableStateOf(0) }
     val snackbarHostState = remember { SnackbarHostState() }
 
+    // Syncing connects over BLE, which needs BLUETOOTH_CONNECT on Android 12+.
+    fun connectPerms(): Array<String> = connectPermissionsFor(Build.VERSION.SDK_INT)
+
+    val refreshPermLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { granted ->
+        if (granted.values.all { it }) viewModel.refresh()
+        else viewModel.showMessage("Bluetooth permission is required to sync. Enable it in Settings → Permissions.")
+    }
+
+    fun requestRefresh() {
+        val perms = connectPerms()
+        if (perms.all { context.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }) {
+            viewModel.refresh()
+        } else {
+            refreshPermLauncher.launch(perms)
+        }
+    }
+
     LaunchedEffect(state.refreshMessage) {
         state.refreshMessage?.let {
             snackbarHostState.showSnackbar(it)
@@ -112,7 +136,7 @@ fun SensorDetailScreen(
                                 Icon(Icons.Default.Close, "Cancel sync")
                             }
                         } else {
-                            IconButton(onClick = { viewModel.refresh() }) {
+                            IconButton(onClick = { requestRefresh() }) {
                                 Icon(Icons.Default.Refresh, "Refresh")
                             }
                         }
@@ -188,7 +212,7 @@ fun SensorDetailScreen(
                                 Icon(Icons.Default.Close, "Cancel sync", tint = Color.White)
                             }
                         } else {
-                            IconButton(onClick = { viewModel.refresh() }) {
+                            IconButton(onClick = { requestRefresh() }) {
                                 Icon(Icons.Default.Refresh, "Refresh", tint = Color.White)
                             }
                         }

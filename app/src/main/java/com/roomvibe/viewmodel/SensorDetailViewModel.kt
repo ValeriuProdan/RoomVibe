@@ -86,6 +86,8 @@ class SensorDetailViewModel(
         }
     }
 
+    fun showMessage(msg: String) = _uiState.update { it.copy(refreshMessage = msg) }
+
     fun clearRefreshMessage() = _uiState.update { it.copy(refreshMessage = null) }
 
     fun exploreGatt() {

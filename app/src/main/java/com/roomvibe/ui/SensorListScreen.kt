@@ -1,6 +1,5 @@
 package com.roomvibe.ui
 
-import android.Manifest
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -40,6 +39,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.roomvibe.R
 import com.roomvibe.ble.FoundDevice
 import com.roomvibe.ble.LywsdProtocol
+import com.roomvibe.ble.blePermissionsFor
+import com.roomvibe.ble.connectPermissionsFor
 import com.roomvibe.data.AppSettings
 import com.roomvibe.data.SyncState
 import com.roomvibe.data.formatTemp
@@ -50,12 +51,8 @@ import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.*
 
-private fun requiredBlePermissions(): Array<String> =
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-        arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
-    } else {
-        arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
-    }
+private fun requiredBlePermissions(): Array<String> = blePermissionsFor(Build.VERSION.SDK_INT)
+private fun requiredConnectPermissions(): Array<String> = connectPermissionsFor(Build.VERSION.SDK_INT)
 
 // Brand wordmark styling (Pacifico script, orange to match the app icon)
 private val BrandFont = FontFamily(Font(R.font.pacifico_regular))
@@ -76,8 +73,11 @@ fun SensorListScreen(
     var menuOpen by remember { mutableStateOf(false) }
     var showRationale by remember { mutableStateOf(false) }
     var showDeniedSettings by remember { mutableStateOf(false) }
+    // Permissions to request, and the action to run once they're granted.
+    var pendingPerms by remember { mutableStateOf(requiredBlePermissions()) }
+    var pendingAction by remember { mutableStateOf<() -> Unit>({}) }
 
-    fun hasBlePermissions(): Boolean = requiredBlePermissions().all {
+    fun hasPermissions(perms: Array<String>): Boolean = perms.all {
         ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
     }
 
@@ -90,17 +90,20 @@ fun SensorListScreen(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { granted ->
         if (granted.values.all { it }) {
-            startScanning()
+            pendingAction()
         } else {
             // Denied — offer to enable it from system settings
             showDeniedSettings = true
         }
     }
 
-    // Tapping + : if we already have permission, scan; otherwise explain first
-    fun onAddClicked() {
-        if (hasBlePermissions()) startScanning() else showRationale = true
+    // Run [action], first requesting [perms] (with a rationale) if they're missing.
+    fun withPermission(perms: Array<String>, action: () -> Unit) {
+        if (hasPermissions(perms)) action()
+        else { pendingPerms = perms; pendingAction = action; showRationale = true }
     }
+
+    fun onAddClicked() = withPermission(requiredBlePermissions()) { startScanning() }
 
     // "Save to…" — the dialog includes Google Drive as a destination
     val backupLauncher = rememberLauncherForActivityResult(
@@ -208,7 +211,7 @@ fun SensorListScreen(
                     sensor = sensor,
                     syncState = state.syncStates[sensor.address],
                     onClick = { onOpenSensor(sensor.address) },
-                    onSync = { viewModel.syncSensor(sensor.address) },
+                    onSync = { withPermission(requiredConnectPermissions()) { viewModel.syncSensor(sensor.address) } },
                     onCancelSync = { viewModel.cancelSync(sensor.address) },
                     onRename = { renameTarget = sensor },
                     onDelete = { viewModel.removeSensor(sensor) }
@@ -265,7 +268,7 @@ fun SensorListScreen(
             confirmButton = {
                 TextButton(onClick = {
                     showRationale = false
-                    permissionLauncher.launch(requiredBlePermissions())
+                    permissionLauncher.launch(pendingPerms)
                 }) { Text("Continue") }
             },
             dismissButton = { TextButton(onClick = { showRationale = false }) { Text("Cancel") } }
