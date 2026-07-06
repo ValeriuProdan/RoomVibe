@@ -4,8 +4,45 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- Thermometer icon -->
+
+    <!-- Thermometer body (orange silhouette) -->
     <path
-        android:fillColor="#FFFFFF"
-        android:pathData="M54,20 C51.24,20 49,22.24 49,25 L49,63.06 C46.6,64.57 45,67.1 45,70 C45,74.42 48.58,78 53,78 L55,78 C59.42,78 63,74.42 63,70 C63,67.1 61.4,64.57 59,63.06 L59,25 C59,22.24 56.76,20 54,20 Z M54,24 C54.55,24 55,24.45 55,25 L55,65 L57,66.16 C58.84,67.22 60,69.03 60,71 C60,73.21 58.21,75 56,75 L52,75 C49.79,75 48,73.21 48,71 C48,69.03 49.16,67.22 51,66.16 L53,65 L53,25 C53,24.45 53.45,24 54,24 Z" />
+        android:fillColor="#FF7A1A"
+        android:pathData="M42,32
+            a6,6 0 0 1 12,0
+            L54,66
+            a12,12 0 1 1 -12,0
+            Z" />
+
+    <!-- Inner stem cutout to give the thermometer a hollow look -->
+    <path
+        android:fillColor="#000000"
+        android:pathData="M45.5,35
+            a2.5,2.5 0 0 1 5,0
+            L50.5,63
+            a2.5,2.5 0 0 1 -5,0
+            Z" />
+
+    <!-- Mercury: filled bulb + rising column -->
+    <path
+        android:fillColor="#FF7A1A"
+        android:pathData="M48,60
+            m-6.5,6.5
+            a6.5,6.5 0 1 0 13,0
+            a6.5,6.5 0 1 0 -13,0" />
+    <path
+        android:fillColor="#FF7A1A"
+        android:pathData="M45.5,50
+            l5,0
+            l0,15
+            l-5,0
+            Z" />
+
+    <!-- Humidity droplet -->
+    <path
+        android:fillColor="#FF7A1A"
+        android:pathData="M70,34
+            Q77,45 77,50
+            A7,7 0 1 1 63,50
+            Q63,45 70,34 Z" />
 </vector>

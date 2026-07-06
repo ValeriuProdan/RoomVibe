@@ -5,12 +5,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
 private val DarkColors = darkColorScheme(
-    primary = Color(0xFF4AA3FF),
-    onPrimary = Color(0xFF06223D),
-    primaryContainer = Color(0xFF14406B),
-    onPrimaryContainer = Color(0xFFD4E6FF),
-    secondary = Color(0xFFFF7043),
-    onSecondary = Color(0xFF3A1400),
+    // Brand accent: orange on a dark theme (replaces the old blue)
+    primary = Color(0xFFFF7A1A),
+    onPrimary = Color(0xFF241300),
+    primaryContainer = Color(0xFF3A2410),
+    onPrimaryContainer = Color(0xFFFFE1C6),
+    secondary = Color(0xFFFFA968),
+    onSecondary = Color(0xFF2A1400),
     secondaryContainer = Color(0xFF2A2D31),
     onSecondaryContainer = Color(0xFFECEFF1),
     background = Color(0xFF0E0F12),

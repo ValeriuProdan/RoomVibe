@@ -1,4 +1,4 @@
-# ThermoLog – Setup Guide
+# RoomVibe – Setup Guide
 
 ## 1. Open in Android Studio
 
@@ -43,7 +43,7 @@ The LYWSD03MMC **stock firmware** may require a Xiaomi account token to serve hi
 4. Once connected tap **Do Activation** then **Flash Firmware**.
 5. Choose the latest `ATC_MiThermometer_vX.X.bin` file and flash.
 6. After flashing, the device renames itself to `ATC_XXXXXX` (last 6 chars of MAC).
-7. In ThermoLog, tap + and scan again — you will see the new `ATC_` name. Add it.
+7. In RoomVibe, tap + and scan again — you will see the new `ATC_` name. Add it.
 
 The pvvx firmware still shows temperature and humidity on the screen exactly as before.
 
@@ -85,7 +85,7 @@ adb pull /data/data/com.thermolog/databases/thermolog.db
 
 From the home screen tap the **⋮ menu** (top-right):
 
-- **Back up to Drive…** — writes a `thermolog-backup-<date>.json` file. In the
+- **Back up to Drive…** — writes a `roomvibe-backup-<date>.json` file. In the
   system "Save to" dialog, choose **Google Drive** (or Files, Dropbox, etc.).
   The file contains every sensor and all stored readings.
 - **Restore from Drive…** — opens the system file picker; navigate to Google

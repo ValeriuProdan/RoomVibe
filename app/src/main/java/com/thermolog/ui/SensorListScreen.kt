@@ -25,9 +25,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -48,6 +52,10 @@ private fun requiredBlePermissions(): Array<String> =
     } else {
         arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
     }
+
+// Brand wordmark styling (Pacifico script, orange to match the app icon)
+private val BrandFont = FontFamily(Font(R.font.pacifico_regular))
+private val BrandOrange = Color(0xFFFF7A1A)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -100,22 +108,28 @@ fun SensorListScreen(
 
     fun defaultBackupName(): String {
         val stamp = SimpleDateFormat("yyyyMMdd-HHmm", Locale.US).format(Date())
-        return "thermolog-backup-$stamp.json"
+        return "roomvibe-backup-$stamp.json"
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("ThermoLog") },
+                title = {
+                    Text(
+                        "RoomVibe",
+                        fontFamily = BrandFont,
+                        color = BrandOrange,
+                        fontSize = 26.sp
+                    )
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimary
+                    containerColor = Color(0xFF0E0F12),
+                    titleContentColor = BrandOrange
                 ),
                 actions = {
                     Box {
                         IconButton(onClick = { menuOpen = true }) {
-                            Icon(Icons.Default.MoreVert, "More",
-                                tint = MaterialTheme.colorScheme.onPrimary)
+                            Icon(Icons.Default.MoreVert, "More", tint = Color.White)
                         }
                         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
                             DropdownMenuItem(
@@ -225,9 +239,9 @@ fun SensorListScreen(
                 Text(
                     if (needsLocation)
                         "To find your sensors over Bluetooth, Android needs the Location " +
-                        "permission for BLE scanning. ThermoLog never uses or stores your location."
+                        "permission for BLE scanning. RoomVibe never uses or stores your location."
                     else
-                        "ThermoLog needs the “Nearby devices” permission to scan for and connect " +
+                        "RoomVibe needs the “Nearby devices” permission to scan for and connect " +
                         "to your Xiaomi sensors over Bluetooth. It is only used to talk to the sensors."
                 )
             },
@@ -249,7 +263,7 @@ fun SensorListScreen(
             title = { Text("Permission required") },
             text = {
                 Text(
-                    "Without Bluetooth permission ThermoLog can't find your sensors. " +
+                    "Without Bluetooth permission RoomVibe can't find your sensors. " +
                     "You can enable it in Settings → Permissions."
                 )
             },
@@ -429,7 +443,7 @@ private fun NotFindingDeviceHelp() {
                 Text(
                     "A sensor can only talk to one app at a time. If the official Xiaomi " +
                     "app (Mi Home / Xiaomi Home) is running, it holds the Bluetooth " +
-                    "connection and ThermoLog can't reach the sensor.\n\n" +
+                    "connection and RoomVibe can't reach the sensor.\n\n" +
                     "Fix: close and force-stop the Xiaomi app\n" +
                     "(long-press its icon → App info → Force stop), then scan again.\n\n" +
                     "Also make sure you're close to the sensor and its battery is OK."
