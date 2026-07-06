@@ -64,6 +64,14 @@ fun SensorDetailScreen(
     var scrubberMs by rememberSaveable { mutableStateOf<Long?>(null) }
     // Landscape shows one chart at a time: 0 = Temperature, 1 = Humidity
     var landscapeMetric by rememberSaveable { mutableStateOf(0) }
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(state.refreshMessage) {
+        state.refreshMessage?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.clearRefreshMessage()
+        }
+    }
 
     LaunchedEffect(state.newestMs, state.oldestMs) {
         val newest = state.newestMs
@@ -76,6 +84,7 @@ fun SensorDetailScreen(
 
     Scaffold(
         containerColor = ScreenBg,
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             // Landscape floats the controls over the chart instead (see below)
             if (!isLandscape) {
@@ -93,6 +102,17 @@ fun SensorDetailScreen(
                         actionIconContentColor = Color.White
                     ),
                     actions = {
+                        if (state.isRefreshing) {
+                            CircularProgressIndicator(
+                                Modifier.size(22.dp).padding(end = 4.dp),
+                                strokeWidth = 2.dp, color = Color.White
+                            )
+                            Spacer(Modifier.width(8.dp))
+                        } else {
+                            IconButton(onClick = { viewModel.refresh() }) {
+                                Icon(Icons.Default.Refresh, "Refresh")
+                            }
+                        }
                         // GATT Explorer hidden for now — keep the code, just no entry point.
                         // IconButton(onClick = { showGattExplorer = !showGattExplorer }) {
                         //     Icon(Icons.Default.Build, "GATT Explorer")
@@ -158,6 +178,14 @@ fun SensorDetailScreen(
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White)
                         }
                         MetricToggle(selected = landscapeMetric, onSelect = { landscapeMetric = it })
+                        if (state.isRefreshing) {
+                            CircularProgressIndicator(Modifier.size(20.dp).padding(start = 6.dp),
+                                strokeWidth = 2.dp, color = Color.White)
+                        } else {
+                            IconButton(onClick = { viewModel.refresh() }) {
+                                Icon(Icons.Default.Refresh, "Refresh", tint = Color.White)
+                            }
+                        }
                     }
                 }
             }
@@ -170,6 +198,13 @@ fun SensorDetailScreen(
             Spacer(Modifier.height(10.dp))
 
             CurrentReadingHeader(state.latest, state.newestMs)
+
+            Text(
+                state.sensorAddress,
+                style = MaterialTheme.typography.labelSmall,
+                color = TextLo,
+                modifier = Modifier.padding(start = 4.dp, top = 4.dp)
+            )
 
             Spacer(Modifier.height(8.dp))
 

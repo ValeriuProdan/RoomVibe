@@ -8,10 +8,13 @@ import android.os.Build
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.HelpOutline
@@ -20,12 +23,17 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.thermolog.R
 import com.thermolog.ble.FoundDevice
+import com.thermolog.ble.LywsdProtocol
 import com.thermolog.data.SyncState
 import com.thermolog.data.entity.Sensor
 import com.thermolog.viewmodel.SensorListViewModel
@@ -143,14 +151,17 @@ fun SensorListScreen(
             }
         }
     ) { pad ->
-        LazyColumn(
-            contentPadding = PaddingValues(16.dp),
+        // Two sensors per row.
+        LazyVerticalGrid(
+            columns = GridCells.Fixed(2),
+            contentPadding = PaddingValues(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.padding(pad).fillMaxSize()
         ) {
             if (state.sensors.isEmpty()) {
-                item {
-                    Box(Modifier.fillParentMaxSize(), contentAlignment = Alignment.Center) {
+                item(span = { GridItemSpan(maxLineSpan) }) {
+                    Box(Modifier.fillMaxWidth().padding(top = 96.dp), contentAlignment = Alignment.Center) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Icon(Icons.Default.DeviceThermostat, null,
                                 modifier = Modifier.size(64.dp),
@@ -286,6 +297,26 @@ fun SensorListScreen(
     }
 }
 
+/** Product photo for recognised Xiaomi sensors, generic thermometer icon otherwise. */
+@Composable
+private fun SensorAvatar(isXiaomi: Boolean, size: androidx.compose.ui.unit.Dp) {
+    if (isXiaomi) {
+        Image(
+            painter = painterResource(R.drawable.xiaomi_sensor),
+            contentDescription = "Xiaomi temperature & humidity sensor",
+            contentScale = ContentScale.Fit,
+            modifier = Modifier.size(size)
+        )
+    } else {
+        Icon(
+            Icons.Default.DeviceThermostat,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(size * 0.8f)
+        )
+    }
+}
+
 @Composable
 private fun SensorCard(
     sensor: Sensor,
@@ -296,77 +327,85 @@ private fun SensorCard(
     onDelete: () -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
+    val syncing = syncState is SyncState.Connecting || syncState is SyncState.Progress
 
     Card(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onClick),
         elevation = CardDefaults.cardElevation(2.dp)
     ) {
-        Column(Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.DeviceThermostat, null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(32.dp))
-                Spacer(Modifier.width(12.dp))
-                Column(Modifier.weight(1f)) {
-                    Text(sensor.alias ?: sensor.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    Text(sensor.address, style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f))
-                    if (sensor.lastSyncMs > 0) {
-                        Text("Last sync: ${formatTime(sensor.lastSyncMs)}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
-                    }
-                }
-                Box {
-                    IconButton(onClick = { expanded = true }) {
-                        Icon(Icons.Default.MoreVert, "Options")
-                    }
-                    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                        DropdownMenuItem(
-                            text = { Text("Rename") },
-                            leadingIcon = { Icon(Icons.Default.Edit, null) },
-                            onClick = { expanded = false; onRename() }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
-                            leadingIcon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) },
-                            onClick = { expanded = false; onDelete() }
-                        )
-                    }
-                }
+        Box(Modifier.fillMaxWidth()) {
+            Column(
+                Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 10.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                SensorAvatar(
+                    isXiaomi = LywsdProtocol.isKnownThermometer(sensor.name),
+                    size = 84.dp
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    sensor.alias ?: sensor.name,
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(2.dp))
+                SyncStatusLine(syncState)
             }
 
-            Spacer(Modifier.height(8.dp))
-
-            when (val s = syncState) {
-                is SyncState.Connecting, is SyncState.Progress -> {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
-                        Text(if (s is SyncState.Progress) s.step else "Connecting…",
-                            style = MaterialTheme.typography.bodySmall)
-                    }
+            // Overflow menu (Sync / Rename / Delete) in the top-right corner
+            Box(Modifier.align(Alignment.TopEnd)) {
+                IconButton(onClick = { expanded = true }, modifier = Modifier.size(36.dp)) {
+                    Icon(Icons.Default.MoreVert, "Options")
                 }
-                is SyncState.Done -> {
-                    Text("✓ Synced (${s.newReadings} new readings)", style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.height(4.dp))
-                    Button(onClick = onSync, modifier = Modifier.fillMaxWidth()) { Text("Sync again") }
-                }
-                is SyncState.Error -> {
-                    Text(s.message, style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error)
-                    Spacer(Modifier.height(4.dp))
-                    Button(onClick = onSync, modifier = Modifier.fillMaxWidth()) { Text("Retry Sync") }
-                }
-                else -> {
-                    Button(onClick = onSync, modifier = Modifier.fillMaxWidth()) {
-                        Icon(Icons.Default.Sync, null, Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("Sync now")
-                    }
+                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Sync now") },
+                        leadingIcon = { Icon(Icons.Default.Sync, null) },
+                        enabled = !syncing,
+                        onClick = { expanded = false; onSync() }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Rename") },
+                        leadingIcon = { Icon(Icons.Default.Edit, null) },
+                        onClick = { expanded = false; onRename() }
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Delete", color = MaterialTheme.colorScheme.error) },
+                        leadingIcon = { Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error) },
+                        onClick = { expanded = false; onDelete() }
+                    )
                 }
             }
         }
+    }
+}
+
+/** Compact, centered one-line sync status shown on a sensor tile. */
+@Composable
+private fun SyncStatusLine(syncState: SyncState?) {
+    when (val s = syncState) {
+        is SyncState.Connecting, is SyncState.Progress -> {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                CircularProgressIndicator(Modifier.size(14.dp), strokeWidth = 2.dp)
+                Text(
+                    if (s is SyncState.Progress) s.step else "Connecting…",
+                    style = MaterialTheme.typography.labelSmall,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+        is SyncState.Done -> Text(
+            "✓ ${s.newReadings} new",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.primary, maxLines = 1
+        )
+        is SyncState.Error -> Text(
+            "Sync failed",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.error, maxLines = 1
+        )
+        else -> { /* idle: nothing — last-sync info lives on the detail screen */ }
     }
 }
 
@@ -520,12 +559,15 @@ private fun DeviceRow(
             })
         },
         leadingContent = {
-            Icon(
-                if (device.isLikelySensor) Icons.Default.DeviceThermostat else Icons.Default.Bluetooth,
-                contentDescription = null,
-                tint = if (device.isLikelySensor) MaterialTheme.colorScheme.primary
-                       else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-            )
+            if (device.isLikelySensor) {
+                SensorAvatar(isXiaomi = true, size = 40.dp)
+            } else {
+                Icon(
+                    Icons.Default.Bluetooth,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                )
+            }
         },
         trailingContent = {
             if (alreadyAdded) {
@@ -555,6 +597,3 @@ private fun RenameDialog(current: String, onConfirm: (String) -> Unit, onDismiss
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
 }
-
-private fun formatTime(ms: Long) =
-    SimpleDateFormat("dd MMM yyyy HH:mm", Locale.getDefault()).format(Date(ms))

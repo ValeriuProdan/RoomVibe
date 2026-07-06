@@ -45,6 +45,10 @@ object LywsdProtocol {
 
     val KNOWN_NAME_PREFIXES = listOf("LYWSD03MMC", "LYWSD02", "ATC_", "MJ_HT_V1", "MIAOMIAOCE")
 
+    /** True if this advertised name matches a known Xiaomi temperature/humidity sensor. */
+    fun isKnownThermometer(name: String?): Boolean =
+        name != null && KNOWN_NAME_PREFIXES.any { name.startsWith(it) }
+
     data class RealtimeReading(
         val temperatureCelsius: Float,
         val humidityPercent: Int,
