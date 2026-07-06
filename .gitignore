@@ -29,6 +29,7 @@ Thumbs.db
 # Keystores / secrets
 *.jks
 *.keystore
+keystore.properties
 
 # Local debugging scratch
 debugImages/
