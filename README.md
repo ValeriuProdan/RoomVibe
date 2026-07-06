@@ -36,7 +36,7 @@ even when you're away from home.
 - **°C / °F** toggle.
 - **Google Drive backup & restore** — export/import all data as a JSON file via the
   system picker (no account setup required).
-- Manage multiple sensors, rename them, and pull-to… (tap) refresh on demand.
+- Manage multiple sensors, rename them, and refresh on demand.
 
 ## Compatibility
 
