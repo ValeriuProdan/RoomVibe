@@ -1,5 +1,6 @@
 package com.thermolog.ui
 
+import android.content.res.Configuration
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -11,10 +12,13 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -40,6 +44,12 @@ private val HumidAccent = Color(0xFF35A7FF)
 private val TextHi = Color(0xFFECEFF1)
 private val TextLo = Color(0xFF9AA0A6)
 
+/** Persists the chart viewport across configuration changes (e.g. rotation). */
+private val ViewportSaver = listSaver<Viewport?, Long>(
+    save = { vp -> vp?.let { listOf(it.startMs, it.endMs) } ?: emptyList() },
+    restore = { if (it.size == 2) Viewport(it[0], it[1]) else null }
+)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SensorDetailScreen(
@@ -47,9 +57,13 @@ fun SensorDetailScreen(
     onBack: () -> Unit
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     var showGattExplorer by remember { mutableStateOf(false) }
-    var viewport by remember { mutableStateOf<Viewport?>(null) }
-    var scrubberMs by remember { mutableStateOf<Long?>(null) }
+    // rememberSaveable so zoom/pan and the scrubber survive rotation
+    var viewport by rememberSaveable(stateSaver = ViewportSaver) { mutableStateOf<Viewport?>(null) }
+    var scrubberMs by rememberSaveable { mutableStateOf<Long?>(null) }
+    // Landscape shows one chart at a time: 0 = Temperature, 1 = Humidity
+    var landscapeMetric by rememberSaveable { mutableStateOf(0) }
 
     LaunchedEffect(state.newestMs, state.oldestMs) {
         val newest = state.newestMs
@@ -60,44 +74,95 @@ fun SensorDetailScreen(
         }
     }
 
-    fun scaleZoom(factor: Float) {
-        val vp = viewport ?: return
-        val center = (vp.startMs + vp.endMs) / 2
-        val newSpan = (vp.span * factor).toLong().coerceIn(3 * HOUR, Long.MAX_VALUE / 4)
-        viewport = Viewport(center - newSpan / 2, center + newSpan / 2)
-    }
-
-    fun fitAll() {
-        val o = state.oldestMs ?: return
-        val n = state.newestMs ?: return
-        val pad = ((n - o) * 0.02).toLong()
-        viewport = Viewport(o - pad, n + pad)
-    }
-
     Scaffold(
         containerColor = ScreenBg,
         topBar = {
-            TopAppBar(
-                title = { Text(state.sensorDisplayName.ifEmpty { state.sensorAddress }) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+            // Landscape floats the controls over the chart instead (see below)
+            if (!isLandscape) {
+                TopAppBar(
+                    title = { Text(state.sensorDisplayName.ifEmpty { state.sensorAddress }) },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                        titleContentColor = Color.White,
+                        navigationIconContentColor = Color.White,
+                        actionIconContentColor = Color.White
+                    ),
+                    actions = {
+                        IconButton(onClick = { showGattExplorer = !showGattExplorer }) {
+                            Icon(Icons.Default.Build, "GATT Explorer")
+                        }
                     }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = Color.White,
-                    navigationIconContentColor = Color.White,
-                    actionIconContentColor = Color.White
-                ),
-                actions = {
-                    IconButton(onClick = { showGattExplorer = !showGattExplorer }) {
-                        Icon(Icons.Default.Build, "GATT Explorer")
-                    }
-                }
-            )
+                )
+            }
         }
     ) { pad ->
+        val vp = viewport
+
+        val tempChart: @Composable (Modifier) -> Unit = { m ->
+            ChartCard(m) {
+                MetricChart(
+                    title = "Temperature", unit = "°", metric = Metric.TEMP,
+                    accent = TempAccent, readings = state.readings, viewport = vp ?: Viewport(0, 1),
+                    scrubberMs = scrubberMs, showTimeLabel = true, showTitle = !isLandscape,
+                    onViewportChange = { viewport = it }, onScrub = { scrubberMs = it },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
+        val humidChart: @Composable (Modifier) -> Unit = { m ->
+            ChartCard(m) {
+                MetricChart(
+                    title = "Humidity", unit = "%", metric = Metric.HUMIDITY,
+                    accent = HumidAccent, readings = state.readings, viewport = vp ?: Viewport(0, 1),
+                    scrubberMs = scrubberMs, showTimeLabel = true, showTitle = !isLandscape,
+                    onViewportChange = { viewport = it }, onScrub = { scrubberMs = it },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
+
+        if (isLandscape) {
+            // Maximise the chart: one metric at a time, filling the whole body,
+            // with the back arrow + metric toggle floating on top of it.
+            Box(Modifier.padding(pad).fillMaxSize().background(ScreenBg)) {
+                if (state.isLoading || vp == null) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                    }
+                } else if (landscapeMetric == 0) {
+                    tempChart(Modifier.fillMaxSize().padding(4.dp))
+                } else {
+                    humidChart(Modifier.fillMaxSize().padding(4.dp))
+                }
+
+                // Floating controls (top-left), clear of any display cutout
+                Surface(
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .displayCutoutPadding()
+                        .padding(8.dp),
+                    shape = RoundedCornerShape(50),
+                    color = Color.Black.copy(alpha = 0.35f)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(end = 6.dp)
+                    ) {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White)
+                        }
+                        MetricToggle(selected = landscapeMetric, onSelect = { landscapeMetric = it })
+                    }
+                }
+            }
+            return@Scaffold
+        }
+
         Column(
             Modifier.padding(pad).fillMaxSize().background(ScreenBg).padding(horizontal = 12.dp)
         ) {
@@ -108,7 +173,6 @@ fun SensorDetailScreen(
             Spacer(Modifier.height(8.dp))
 
             // Zoom-level + range
-            val vp = viewport
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 4.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -135,56 +199,9 @@ fun SensorDetailScreen(
                     CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
                 }
             } else {
-                ChartCard(Modifier.weight(1f)) {
-                    MetricChart(
-                        title = "Temperature",
-                        unit = "°",
-                        metric = Metric.TEMP,
-                        accent = TempAccent,
-                        readings = state.readings,
-                        viewport = vp,
-                        scrubberMs = scrubberMs,
-                        showTimeLabel = true,
-                        onViewportChange = { viewport = it },
-                        onScrub = { scrubberMs = it },
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
+                tempChart(Modifier.weight(1f).fillMaxWidth())
                 Spacer(Modifier.height(8.dp))
-                ChartCard(Modifier.weight(1f)) {
-                    MetricChart(
-                        title = "Humidity",
-                        unit = "%",
-                        metric = Metric.HUMIDITY,
-                        accent = HumidAccent,
-                        readings = state.readings,
-                        viewport = vp,
-                        scrubberMs = scrubberMs,
-                        showTimeLabel = false,
-                        onViewportChange = { viewport = it },
-                        onScrub = { scrubberMs = it },
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
-            }
-
-            // Zoom controls
-            Row(
-                Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                FilledTonalButton(onClick = { scaleZoom(2f) }, modifier = Modifier.weight(1f)) {
-                    Icon(Icons.Default.ZoomOut, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp)); Text("Zoom out")
-                }
-                FilledTonalIconButton(onClick = { fitAll() }) {
-                    Icon(Icons.Default.FitScreen, "Fit all")
-                }
-                FilledTonalButton(onClick = { scaleZoom(0.5f) }, modifier = Modifier.weight(1f)) {
-                    Icon(Icons.Default.ZoomIn, null, Modifier.size(18.dp))
-                    Spacer(Modifier.width(6.dp)); Text("Zoom in")
-                }
+                humidChart(Modifier.weight(1f).fillMaxWidth())
             }
 
             Text(
@@ -204,6 +221,31 @@ fun SensorDetailScreen(
             }
 
             Spacer(Modifier.height(10.dp))
+        }
+    }
+}
+
+/** Landscape metric switcher shown in the top bar (Temperature / Humidity). */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MetricToggle(selected: Int, onSelect: (Int) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        listOf("Temperature" to TempAccent, "Humidity" to HumidAccent).forEachIndexed { i, (label, accent) ->
+            val isSel = selected == i
+            Surface(
+                onClick = { onSelect(i) },
+                shape = RoundedCornerShape(50),
+                color = if (isSel) Color.White.copy(alpha = 0.22f) else Color.Transparent
+            ) {
+                Text(
+                    label,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                    color = if (isSel) Color.White else Color.White.copy(alpha = 0.6f),
+                    fontWeight = if (isSel) FontWeight.SemiBold else FontWeight.Normal,
+                    style = MaterialTheme.typography.titleSmall
+                )
+            }
+            if (i == 0) Spacer(Modifier.width(6.dp))
         }
     }
 }

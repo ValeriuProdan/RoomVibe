@@ -83,6 +83,7 @@ fun MetricChart(
     viewport: Viewport,
     scrubberMs: Long?,
     showTimeLabel: Boolean,
+    showTitle: Boolean = true,
     onViewportChange: (Viewport) -> Unit,
     onScrub: (Long?) -> Unit,
     modifier: Modifier = Modifier
@@ -158,12 +159,16 @@ fun MetricChart(
     ) {
         val w = size.width - PAD_L - PAD_R
         val h = size.height - PAD_T - PAD_B
+        // Guard against degenerate sizes (e.g. mid-rotation the canvas can be ~0)
+        if (w < 8f || h < 8f) return@Canvas
         val lod = lodFor(viewport.span)
         val points = buildPoints(readings, viewport.startMs, viewport.endMs, lod, metric)
 
-        // Title (left of the header band)
-        drawText(textMeasurer.measure(title, TextStyle(fontSize = 13.sp, color = titleColor,
-            fontWeight = FontWeight.SemiBold)), topLeft = Offset(PAD_L, 4f))
+        // Title (left of the header band); hidden in landscape where the toggle names it
+        if (showTitle) {
+            drawText(textMeasurer.measure(title, TextStyle(fontSize = 13.sp, color = titleColor,
+                fontWeight = FontWeight.SemiBold)), topLeft = Offset(PAD_L, 4f))
+        }
 
         if (points.isEmpty()) {
             drawText(textMeasurer.measure("No data in range", axisLabel),
@@ -383,10 +388,10 @@ private fun DrawScope.drawMarker(
     val m = textMeasurer.measure(text, TextStyle(fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.SemiBold))
     val padX = 7f; val padY = 3f
     val boxW = m.size.width + padX * 2; val boxH = m.size.height + padY * 2
-    val bx = (cx - boxW / 2).coerceIn(0f, size.width - boxW)
+    val bx = (cx - boxW / 2).coerceIn(0f, maxOf(0f, size.width - boxW))
     // Keep the pill inside the plot band so it never overlaps the header title or axis labels
     val by = (if (above) cy - boxH - 8f else cy + 8f)
-        .coerceIn(PAD_T, size.height - PAD_B - boxH)
+        .coerceIn(PAD_T, maxOf(PAD_T, size.height - PAD_B - boxH))
     drawRoundRect(if (solidBg) accent else accent.copy(alpha = 0.92f),
         topLeft = Offset(bx, by), size = Size(boxW, boxH), cornerRadius = CornerRadius(boxH / 2, boxH / 2))
     drawText(m, topLeft = Offset(bx + padX, by + padY))
