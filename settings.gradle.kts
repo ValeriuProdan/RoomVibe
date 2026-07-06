@@ -20,5 +20,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "ThermoLog"
+rootProject.name = "RoomVibe"
 include(":app")

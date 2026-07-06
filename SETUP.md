@@ -6,7 +6,7 @@
 
 ## 1. Open in Android Studio
 
-File → Open → select the `ThermoLog` folder. Android Studio will sync Gradle automatically.
+File → Open → select the `RoomVibe` folder. Android Studio will sync Gradle automatically.
 
 If it asks to upgrade the AGP version, click **Don't remind me again** (the versions in the file are intentional).
 
