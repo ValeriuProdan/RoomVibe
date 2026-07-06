@@ -28,7 +28,7 @@ even when you're away from home.
 
 ## Download
 
-📦 **[Download the latest APK »](https://github.com/ValeriuProdan/ThermoLog/releases/latest)**
+📦 **[Download the latest APK »](https://github.com/ValeriuProdan/RoomVibe/releases/latest)**
 
 1. Download `RoomVibe-<version>.apk` from the latest release.
 2. On your Android phone (8.0+), open the file and allow *"install from unknown

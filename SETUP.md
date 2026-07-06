@@ -1,7 +1,7 @@
 # RoomVibe – Setup Guide
 
 > **Just want to use the app?** You don't need to build it — download the ready-made
-> APK from the [latest release](https://github.com/ValeriuProdan/ThermoLog/releases/latest)
+> APK from the [latest release](https://github.com/ValeriuProdan/RoomVibe/releases/latest)
 > and install it on your phone. The steps below are for building from source.
 
 ## 1. Open in Android Studio
