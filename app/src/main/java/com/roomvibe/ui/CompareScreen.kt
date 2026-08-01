@@ -24,8 +24,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -54,6 +56,9 @@ import kotlin.math.abs
 
 private const val HOUR = 3_600_000L
 private const val DAY = 24 * HOUR
+
+/** Room left along the bottom for the page dots HomePager draws over this screen. */
+private val PAGER_DOTS_SPACE = 32.dp
 
 private val ScreenBg = Color(0xFF0E0F12)
 private val CardBg = Color(0xFF1B1D21)
@@ -333,9 +338,15 @@ private fun CompareLandscape(
     onBack: () -> Unit
 ) {
     var showDevices by rememberSaveable { mutableStateOf(false) }
+    val density = LocalDensity.current
+    // Measured from the bottom overlay so the plot stops above it rather than
+    // running underneath — the readout wraps with the device count, so this can't
+    // be a fixed number.
+    var bottomOverlay by remember { mutableStateOf(0.dp) }
+    val showReadout = prepared.isNotEmpty() && scrubberMs != null && !showDevices
 
     Box(Modifier.padding(pad).fillMaxSize().background(ScreenBg)) {
-        chartBody(Modifier.fillMaxSize().padding(4.dp))
+        chartBody(Modifier.fillMaxSize().padding(4.dp).padding(bottom = bottomOverlay))
 
         // Controls (top-left), clear of any display cutout
         Surface(
@@ -388,22 +399,29 @@ private fun CompareLandscape(
             }
         }
 
-        // Marker readout as a strip along the bottom, spending width (which
-        // landscape has) instead of height (which the chart needs).
-        if (prepared.isNotEmpty() && scrubberMs != null && !showDevices) {
-            CompactReadout(
-                devices = prepared,
-                scrubberMs = scrubberMs,
-                metric = metric,
-                unit = unit,
-                lod = lod,
-                fahrenheit = fahrenheit,
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-                    .displayCutoutPadding()
-                    .padding(horizontal = 8.dp, vertical = 6.dp)
-            )
+        // Everything that lives along the bottom, stacked and measured as one
+        // block: the marker readout, then room for the pager dots that HomePager
+        // draws over this screen.
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .onSizeChanged { bottomOverlay = with(density) { it.height.toDp() } }
+                .navigationBarsPadding()
+                .displayCutoutPadding()
+                .padding(horizontal = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            if (showReadout) {
+                CompactReadout(
+                    devices = prepared,
+                    scrubberMs = scrubberMs,
+                    metric = metric,
+                    unit = unit,
+                    lod = lod,
+                    fahrenheit = fahrenheit
+                )
+            }
+            Spacer(Modifier.height(PAGER_DOTS_SPACE))
         }
 
         // Device picker, revealed by the controls button
