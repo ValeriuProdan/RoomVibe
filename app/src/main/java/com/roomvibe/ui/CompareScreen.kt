@@ -388,9 +388,10 @@ private fun CompareLandscape(
             }
         }
 
-        // Marker readout (bottom-left), narrow so it leaves the plot readable
+        // Marker readout as a strip along the bottom, spending width (which
+        // landscape has) instead of height (which the chart needs).
         if (prepared.isNotEmpty() && scrubberMs != null && !showDevices) {
-            ScrubReadout(
+            CompactReadout(
                 devices = prepared,
                 scrubberMs = scrubberMs,
                 metric = metric,
@@ -398,11 +399,10 @@ private fun CompareLandscape(
                 lod = lod,
                 fahrenheit = fahrenheit,
                 modifier = Modifier
-                    .align(Alignment.BottomStart)
+                    .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
                     .displayCutoutPadding()
-                    .padding(8.dp)
-                    .widthIn(max = 320.dp)
+                    .padding(horizontal = 8.dp, vertical = 6.dp)
             )
         }
 
@@ -427,6 +427,103 @@ private fun CompareLandscape(
                         onNone = onNone,
                         maxChipHeight = 96.dp
                     )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The marker readout for landscape: one strip along the bottom rather than a card
+ * in the corner.
+ *
+ * It carries the same figures as the portrait card, laid out along the wide axis
+ * so it costs the chart a single row of height instead of a quarter of the plot.
+ * With more devices than fit it wraps upward rather than scrolling, since a
+ * sideways scroller here would fight the pager.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun CompactReadout(
+    devices: List<Prepared>,
+    scrubberMs: Long,
+    metric: Metric,
+    unit: String,
+    lod: Lod,
+    fahrenheit: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val rows = remember(devices, scrubberMs, lod) {
+        devices
+            .map { d -> ReadoutRow(d.label, d.style, d.data.bucketAt(scrubberMs, lod)) }
+            .rankedForReadout()
+    }
+    if (rows.isEmpty()) return
+
+    fun show(v: Float) = if (metric == Metric.TEMP && fahrenheit) v * 9f / 5f + 32f else v
+
+    val labels = rememberTimeLabels()
+    val measured = rows.mapNotNull { it.bucket }
+    val anchor = measured.minByOrNull { abs(it.tMs - scrubberMs) }
+    val spread = if (measured.size > 1) measured.maxOf { it.mid } - measured.minOf { it.mid } else null
+
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(12.dp),
+        color = Color(0xFF0E0F12).copy(alpha = 0.92f)
+    ) {
+        FlowRow(
+            Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                labels.tooltip(lod, anchor?.bucketStart ?: scrubberMs),
+                style = MaterialTheme.typography.labelMedium, color = TextLo,
+                modifier = Modifier.align(Alignment.CenterVertically)
+            )
+            if (spread != null) {
+                Text(
+                    "spread %.1f%s".format(
+                        show(measured.maxOf { it.mid }) - show(measured.minOf { it.mid }), unit),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (abs(spread) >= 1f) MaterialTheme.colorScheme.primary else TextLo,
+                    modifier = Modifier.align(Alignment.CenterVertically)
+                )
+            }
+            rows.forEach { row ->
+                val bucket = row.bucket
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.align(Alignment.CenterVertically)
+                ) {
+                    SeriesSwatch(row.style, selected = bucket != null)
+                    Spacer(Modifier.width(5.dp))
+                    Text(
+                        row.label,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (bucket != null) TextHi else TextLo,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = 110.dp)
+                    )
+                    Spacer(Modifier.width(5.dp))
+                    if (bucket == null) {
+                        Text("—", style = MaterialTheme.typography.labelMedium, color = TextLo)
+                    } else {
+                        Text(
+                            "%.1f%s".format(show(bucket.mid), unit),
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold, color = TextHi
+                        )
+                        if (lod != Lod.HOURLY) {
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                "%.0f–%.0f".format(show(bucket.lo), show(bucket.hi)),
+                                style = MaterialTheme.typography.labelSmall, color = TextLo
+                            )
+                        }
+                    }
                 }
             }
         }
