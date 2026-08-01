@@ -47,6 +47,13 @@ even when you're away from home.
 - **Comfort-coloured lines** — temperature is coloured by human thermal comfort
   (green ≈ 20–25 °C, blue when cold, red when hot); humidity is green at the ideal
   (~48%) and red at the dry/humid extremes.
+- **Compare devices** — swipe left from the sensor list (or tap the chart icon) for
+  a second screen that plots several sensors on one shared axis, so you can see
+  balcony-versus-living-room directly instead of eyeballing two charts. Tick devices
+  on and off, and drag the marker to read every device's value at that moment
+  together with the spread between them. Zoomed out to whole days each device
+  shows its min–max envelope, not just the daily average. Every device keeps its
+  own colour, drawn from a fixed colour-blind-safe palette.
 - **°C / °F** toggle.
 - **Google Drive backup & restore** — export/import all data as a JSON file via the
   system picker (no account setup required).
