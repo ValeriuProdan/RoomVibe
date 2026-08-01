@@ -55,6 +55,16 @@ class SensorRepository(private val context: Context) {
     fun allReadings(address: String): Flow<List<Reading>> =
         readingDao.getAllForSensor(address)
 
+    /**
+     * Readings for several sensors at once, grouped by address and sorted by time —
+     * what the compare chart plots. An empty selection short-circuits, since
+     * `IN ()` isn't valid SQL.
+     */
+    fun readingsBySensor(addresses: Collection<String>): Flow<Map<String, List<Reading>>> =
+        if (addresses.isEmpty()) flowOf(emptyMap())
+        else readingDao.getAllForSensors(addresses.toList())
+            .map { readings -> readings.groupBy { it.sensorAddress } }
+
     suspend fun oldestReadingMs(address: String): Long? = readingDao.getOldestTimestampMs(address)
     suspend fun newestReadingMs(address: String): Long? = readingDao.getNewestTimestampMs(address)
     suspend fun readingCount(address: String): Int = readingDao.getCount(address)

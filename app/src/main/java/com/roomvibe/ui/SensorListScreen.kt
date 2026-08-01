@@ -62,7 +62,8 @@ private val BrandOrange = Color(0xFFFF7A1A)
 @Composable
 fun SensorListScreen(
     viewModel: SensorListViewModel,
-    onOpenSensor: (String) -> Unit
+    onOpenSensor: (String) -> Unit,
+    onOpenCompare: () -> Unit = {}
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -136,6 +137,10 @@ fun SensorListScreen(
                     titleContentColor = BrandOrange
                 ),
                 actions = {
+                    // Also reachable by swiping left — this is the discoverable way in.
+                    IconButton(onClick = onOpenCompare) {
+                        Icon(Icons.Default.StackedLineChart, "Compare devices", tint = Color.White)
+                    }
                     Box {
                         IconButton(onClick = { menuOpen = true }) {
                             Icon(Icons.Default.MoreVert, "More", tint = Color.White)
@@ -186,7 +191,8 @@ fun SensorListScreen(
         // Two sensors per row.
         LazyVerticalGrid(
             columns = GridCells.Fixed(2),
-            contentPadding = PaddingValues(12.dp),
+            // Extra room at the bottom so the last row can scroll clear of the page dots.
+            contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 44.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.padding(pad).fillMaxSize()

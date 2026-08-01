@@ -5,7 +5,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-/** Small persisted app-wide preferences (currently just the temperature unit). */
+/** Small persisted app-wide preferences (temperature unit, compare-chart state). */
 class AppSettings private constructor(context: Context) {
     private val prefs = context.getSharedPreferences("roomvibe_settings", Context.MODE_PRIVATE)
 
@@ -17,8 +17,37 @@ class AppSettings private constructor(context: Context) {
         _fahrenheit.value = value
     }
 
+    // ── Compare chart ────────────────────────────────────────────────────────
+
+    /** Devices currently plotted on the compare chart, or null if never chosen. */
+    private val _compareSelection = MutableStateFlow(
+        if (prefs.contains(KEY_COMPARE_SELECTION))
+            prefs.getStringSet(KEY_COMPARE_SELECTION, emptySet())!!.toSet()
+        else null
+    )
+    val compareSelection: StateFlow<Set<String>?> = _compareSelection.asStateFlow()
+
+    fun setCompareSelection(addresses: Set<String>) {
+        prefs.edit().putStringSet(KEY_COMPARE_SELECTION, addresses).apply()
+        _compareSelection.value = addresses
+    }
+
+    /** Address → colour slot on the compare chart. Assigned once, then stable. */
+    private val _seriesSlots = MutableStateFlow(SeriesSlots.decode(prefs.getString(KEY_SERIES_SLOTS, null)))
+    val seriesSlots: StateFlow<Map<String, Int>> = _seriesSlots.asStateFlow()
+
+    /** Give every known device a slot, keeping the ones already handed out. */
+    fun syncSeriesSlots(addresses: List<String>) {
+        val next = SeriesSlots.assign(_seriesSlots.value, addresses)
+        if (next == _seriesSlots.value) return
+        prefs.edit().putString(KEY_SERIES_SLOTS, SeriesSlots.encode(next)).apply()
+        _seriesSlots.value = next
+    }
+
     companion object {
         private const val KEY_FAHRENHEIT = "fahrenheit"
+        private const val KEY_COMPARE_SELECTION = "compare_selection"
+        private const val KEY_SERIES_SLOTS = "series_slots"
 
         @Volatile private var instance: AppSettings? = null
         fun get(context: Context): AppSettings =

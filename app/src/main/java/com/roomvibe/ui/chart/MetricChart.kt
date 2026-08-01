@@ -1,114 +1,33 @@
 package com.roomvibe.ui.chart
 
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.runtime.*
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
-import androidx.compose.ui.graphics.*
-import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.sp
 import com.roomvibe.data.entity.Reading
-import java.text.SimpleDateFormat
-import java.util.Calendar
-import java.util.Date
-import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.roundToInt
-import kotlin.math.sqrt
 
-private const val HOUR = 3_600_000L
-private const val DAY = 24 * HOUR
-
-private const val PAD_L = 12f
-private const val PAD_R = 52f
-private const val PAD_T = 34f   // header band: title (left) + scrubber date (right)
-private const val PAD_B = 26f
-
-enum class Metric { TEMP, HUMIDITY }
-enum class Lod { HOURLY, DAILY, MONTHLY }
-
-fun lodFor(span: Long): Lod = when {
-    span <= 6 * DAY -> Lod.HOURLY
-    span <= 550 * DAY -> Lod.DAILY
-    else -> Lod.MONTHLY
-}
-
-fun zoomLabel(span: Long): String = when (lodFor(span)) {
-    Lod.HOURLY -> "Hourly"
-    Lod.DAILY -> "Daily"
-    Lod.MONTHLY -> "Monthly"
-}
-
-// Temperature → colour ramp anchored to human thermal comfort (ASHRAE ~20–25 °C
-// comfort zone): green through the comfortable band, blue when cold, red when hot.
-private val TEMP_STOPS = listOf(
-    0f to Color(0xFF1565C0),    // very cold — deep blue
-    8f to Color(0xFF2196F3),    // cold — blue
-    14f to Color(0xFF26C6DA),   // cool — cyan
-    18f to Color(0xFF66BB6A),   // slightly cool — light green
-    20f to Color(0xFF43A047),   // comfortable — green
-    25f to Color(0xFF43A047),   // comfortable — green
-    28f to Color(0xFFF4C020),   // warm — amber
-    31f to Color(0xFFFF7A1A),   // hot — orange
-    36f to Color(0xFFE53935)    // very hot — red
-)
-
-// Humidity → comfort ramp: green at the ideal (~48%), shading to red at both
-// extremes (too dry and too humid).
-private val HUMID_STOPS = listOf(
-    15f to Color(0xFFE53935),   // too dry — red
-    30f to Color(0xFFFB8C00),   // orange
-    40f to Color(0xFF9CCC65),   // light green
-    48f to Color(0xFF43A047),   // ideal — green
-    56f to Color(0xFF9CCC65),   // light green
-    68f to Color(0xFFFB8C00),   // orange
-    82f to Color(0xFFE53935)    // too humid — red
-)
-
-private fun interpStops(value: Float, stops: List<Pair<Float, Color>>): Color {
-    val first = stops.first()
-    val last = stops.last()
-    if (value <= first.first) return first.second
-    if (value >= last.first) return last.second
-    for (i in 0 until stops.size - 1) {
-        val (v0, c0) = stops[i]
-        val (v1, c1) = stops[i + 1]
-        if (value in v0..v1) return lerp(c0, c1, (value - v0) / (v1 - v0))
-    }
-    return last.second
-}
-
-fun tempColor(celsius: Float): Color = interpStops(celsius, TEMP_STOPS)
-fun humidColor(percent: Float): Color = interpStops(percent, HUMID_STOPS)
-
-data class Viewport(val startMs: Long, val endMs: Long) {
-    val span get() = (endMs - startMs).coerceAtLeast(1L)
-}
-
-private data class Point(
-    val tMs: Long,
-    val bucketStart: Long,
-    val lo: Float,
-    val hi: Float
-) {
-    val mid get() = (lo + hi) / 2f
-}
+/** Colour stops in the value-coloured line gradient. Past this, more is invisible. */
+private const val MAX_GRADIENT_STOPS = 64
 
 /**
  * A single dark-themed metric chart (temperature OR humidity) in the Mi-Home style:
@@ -132,7 +51,11 @@ fun MetricChart(
     onScrub: (Long?) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val textMeasurer = rememberTextMeasurer()
+    // A pan redraws a dozen-plus labels per frame; the default 8-entry cache thrashes.
+    val textMeasurer = rememberTextMeasurer(cacheSize = 48)
+    // Scratch buffers and date formatters reused across frames.
+    val paths = remember { ChartPaths() }
+    val labels = rememberTimeLabels()
     val gridColor = Color(0x1FFFFFFF)
     val axisLabel = TextStyle(fontSize = 10.sp, color = Color(0xFF9AA0A6))
     val titleColor = Color(0xFFE8EAED)
@@ -146,67 +69,27 @@ fun MetricChart(
 
     val dataMin = readings.first().timestampMs
     val dataMax = readings.last().timestampMs
-    val minSpan = 3 * HOUR
-    val maxSpan = ((dataMax - dataMin).coerceAtLeast(DAY) * 1.1).toLong()
 
-    val vpState = rememberUpdatedState(viewport)
-    val onVpState = rememberUpdatedState(onViewportChange)
-    val onScrubState = rememberUpdatedState(onScrub)
+    // Bucketed once per zoom level, not once per frame — panning then costs a
+    // binary search instead of a full re-aggregation of the visible history.
+    val lod = lodFor(viewport.span)
+    val seriesData = rememberSeriesData(readings, metric)
 
     Canvas(
-        modifier = modifier.pointerInput(readings.size) {
-            awaitEachGesture {
-                val first = awaitFirstDown(requireUnconsumed = false)
-                // Lower ~40% of the plot area pans; upper part scrubs.
-                val plotTop = PAD_T
-                val plotBottom = size.height - PAD_B
-                val panZoneTop = plotTop + (plotBottom - plotTop) * 0.8f
-                val panMode = first.position.y > panZoneTop
-
-                if (!panMode) scrubAt(first.position.x, size.width, vpState.value, onScrubState.value)
-                var prevX = first.position.x
-                var prevCentroid: Offset? = null
-                var prevSpread = 0f
-                while (true) {
-                    val event = awaitPointerEvent()
-                    val pts = event.changes.filter { it.pressed }
-                    if (pts.isEmpty()) break
-                    if (pts.size == 1) {
-                        val x = pts[0].position.x
-                        if (panMode) {
-                            panBy(x - prevX, size.width, vpState.value, dataMin, dataMax, onVpState.value)
-                        } else {
-                            scrubAt(x, size.width, vpState.value, onScrubState.value)
-                        }
-                        prevX = x
-                        pts[0].consume()
-                        prevCentroid = null; prevSpread = 0f
-                    } else {
-                        val cx = pts.sumOf { it.position.x.toDouble() }.toFloat() / pts.size
-                        val cy = pts.sumOf { it.position.y.toDouble() }.toFloat() / pts.size
-                        val centroid = Offset(cx, cy)
-                        val spread = pts.sumOf { (it.position - centroid).getDistance().toDouble() }
-                            .toFloat() / pts.size
-                        val pc = prevCentroid
-                        if (pc != null && prevSpread > 0f) {
-                            val zoom = if (spread > 0f) spread / prevSpread else 1f
-                            applyTransform(centroid.x, centroid.x - pc.x, zoom, size.width,
-                                vpState.value, minSpan, maxSpan, dataMin, dataMax, onVpState.value)
-                        }
-                        prevCentroid = centroid; prevSpread = spread
-                        prevX = centroid.x
-                        pts.forEach { it.consume() }
-                    }
-                }
-            }
-        }
+        modifier = modifier.chartGestures(
+            resetKey = readings.size,
+            viewport = viewport,
+            dataMin = dataMin,
+            dataMax = dataMax,
+            onViewportChange = onViewportChange,
+            onScrub = onScrub
+        )
     ) {
         val w = size.width - PAD_L - PAD_R
         val h = size.height - PAD_T - PAD_B
         // Guard against degenerate sizes (e.g. mid-rotation the canvas can be ~0)
         if (w < 8f || h < 8f) return@Canvas
-        val lod = lodFor(viewport.span)
-        val points = buildPoints(readings, viewport.startMs, viewport.endMs, lod, metric)
+        val points = seriesData.visible(lod, viewport.startMs, viewport.endMs)
 
         // Convert a stored value to the displayed number (°F when requested).
         // Colours still use the raw Celsius value, so the ramp is unit-independent.
@@ -218,7 +101,10 @@ fun MetricChart(
                 fontWeight = FontWeight.SemiBold)), topLeft = Offset(PAD_L, 4f))
         }
 
-        if (points.isEmpty()) {
+        // Not just "no points": panned past the end of the history the slice still
+        // carries one far-off overscan point, and the min/max pills would clamp it
+        // on-screen as though it belonged to this window.
+        if (!points.intersects(viewport.startMs, viewport.endMs)) {
             drawText(textMeasurer.measure("No data in range", axisLabel),
                 topLeft = Offset(PAD_L, PAD_T + h / 2))
             return@Canvas
@@ -228,8 +114,9 @@ fun MetricChart(
         val hi = ceil(points.maxOf { it.hi } + 1f)
         val range = (hi - lo).coerceAtLeast(1f)
 
-        fun xOf(tMs: Long) = PAD_L + ((tMs - viewport.startMs).toDouble() / viewport.span * w).toFloat()
-        fun yOf(v: Float) = PAD_T + h - (v - lo) / range * h
+        val scale = ChartScale(viewport.startMs, viewport.span, PAD_L, w, lo, range, PAD_T, h)
+        fun xOf(tMs: Long) = scale.x(tMs)
+        fun yOf(v: Float) = scale.y(v)
 
         // Dashed grid + right axis labels
         val dash = PathEffect.dashPathEffect(floatArrayOf(6f, 8f))
@@ -249,49 +136,62 @@ fun MetricChart(
             else -> humidColor(v)
         }
 
-        // Build screen-space points for the primary (hi/mid) line
-        val primary = points.map { Offset(xOf(it.tMs), yOf(if (lod == Lod.HOURLY) it.mid else it.hi)) }
-        val primaryVals = points.map { if (lod == Lod.HOURLY) it.mid else it.hi }
+        // The primary line follows the midpoint at hourly detail, the daily maximum
+        // when zoomed out (the minimum gets its own dashed line below).
+        val primaryPart = if (lod == Lod.HOURLY) Part.MID else Part.HI
+        fun valueAt(i: Int, part: Part): Float {
+            val p = points[i]
+            return when (part) { Part.MID -> p.mid; Part.HI -> p.hi; Part.LO -> p.lo }
+        }
 
-        // Horizontal gradient brush that colours a line by each point's value
-        fun valueBrush(values: List<Float>, alpha: Float): Brush {
-            val firstX = primary.first().x; val lastX = primary.last().x
+        // Horizontal gradient brush that colours a line by each point's value.
+        // The shader is rebuilt every frame, so the stops are thinned to a fixed
+        // budget — well past the point where more of them are visible.
+        fun valueBrush(part: Part, alpha: Float): Brush {
+            val firstX = xOf(points.first().tMs); val lastX = xOf(points.last().tMs)
             val gspan = lastX - firstX
-            if (gspan <= 0f) return SolidColor(colorAt(values.first()).copy(alpha = alpha))
+            if (gspan <= 0f) return SolidColor(colorAt(valueAt(0, part)).copy(alpha = alpha))
+            val stride = maxOf(1, points.size / MAX_GRADIENT_STOPS)
             var prev = -1f
-            val stops = primary.indices.map { i ->
-                var f = ((primary[i].x - firstX) / gspan).coerceIn(0f, 1f)
-                if (f <= prev) f = (prev + 1e-4f).coerceAtMost(1f)
-                prev = f
-                f to colorAt(values[i]).copy(alpha = alpha)
-            }
+            val stops = points.indices
+                .filter { it % stride == 0 || it == points.lastIndex }
+                .map { i ->
+                    var f = ((xOf(points[i].tMs) - firstX) / gspan).coerceIn(0f, 1f)
+                    if (f <= prev) f = (prev + 1e-4f).coerceAtMost(1f)
+                    prev = f
+                    f to colorAt(valueAt(i, part)).copy(alpha = alpha)
+                }
             return Brush.linearGradient(colorStops = stops.toTypedArray(),
                 start = Offset(firstX, 0f), end = Offset(lastX, 0f))
         }
 
         // Fill under the primary line (skipped for the value-coloured temperature line)
         if (!colorByValue) {
-            val fill = smoothPath(primary).apply {
-                lineTo(primary.last().x, PAD_T + h)
-                lineTo(primary.first().x, PAD_T + h)
-                close()
-            }
-            drawPath(fill, Brush.verticalGradient(
-                listOf(accent.copy(alpha = 0.35f), accent.copy(alpha = 0.02f)),
-                startY = PAD_T, endY = PAD_T + h))
+            drawPath(
+                paths.areaUnder(points, scale, primaryPart, baselineY = PAD_T + h),
+                Brush.verticalGradient(
+                    listOf(accent.copy(alpha = 0.35f), accent.copy(alpha = 0.02f)),
+                    startY = PAD_T, endY = PAD_T + h)
+            )
         }
 
-        // Primary line
+        // Primary line. Each path is drawn straight after it is built — the builder
+        // hands back one reused Path, so never hold two at once.
         val lineStroke = Stroke(4.0f, cap = StrokeCap.Round, join = StrokeJoin.Round)
-        if (colorByValue) drawPath(smoothPath(primary), valueBrush(primaryVals, alpha = 1f), style = lineStroke)
-        else drawPath(smoothPath(primary), accent, style = lineStroke)
+        if (colorByValue) {
+            drawPath(paths.line(points, scale, primaryPart), valueBrush(primaryPart, alpha = 1f), style = lineStroke)
+        } else {
+            drawPath(paths.line(points, scale, primaryPart), accent, style = lineStroke)
+        }
 
         // Min line (dashed) for daily/monthly
         if (lod != Lod.HOURLY) {
-            val lows = points.map { Offset(xOf(it.tMs), yOf(it.lo)) }
             val minStroke = Stroke(3.0f, cap = StrokeCap.Round, join = StrokeJoin.Round, pathEffect = dash)
-            if (colorByValue) drawPath(smoothPath(lows), valueBrush(points.map { it.lo }, alpha = 0.9f), style = minStroke)
-            else drawPath(smoothPath(lows), accent.copy(alpha = 0.6f), style = minStroke)
+            if (colorByValue) {
+                drawPath(paths.line(points, scale, Part.LO), valueBrush(Part.LO, alpha = 0.9f), style = minStroke)
+            } else {
+                drawPath(paths.line(points, scale, Part.LO), accent.copy(alpha = 0.6f), style = minStroke)
+            }
         }
 
         // Subtle hint marking the lower pan zone
@@ -316,21 +216,18 @@ fun MetricChart(
             drawMarker(textMeasurer, xOf(minP.tMs), yOf(minP.lo), "%.1f".format(disp(minP.lo)), colorAt(minP.lo), above = false)
         }
 
-        // X-axis time labels
-        val tfmt = timeAxisFormat(lod)
-        val labelCount = (w / 90f).roundToInt().coerceIn(2, 6)
-        for (i in 0..labelCount) {
-            val tMs = viewport.startMs + viewport.span * i / labelCount
-            val x = PAD_L + w * i / labelCount
-            val lbl = textMeasurer.measure(tfmt.format(Date(tMs)), axisLabel)
-            val tx = (x - lbl.size.width / 2f).coerceIn(0f, size.width - lbl.size.width)
+        // X-axis time labels, on round clock boundaries
+        val target = (w / 90f).roundToInt().coerceIn(2, 6)
+        for (tMs in labels.axisTicks(viewport.startMs, viewport.endMs, target)) {
+            val lbl = textMeasurer.measure(labels.axis(lod, tMs), axisLabel)
+            val tx = (xOf(tMs) - lbl.size.width / 2f).coerceIn(0f, size.width - lbl.size.width)
             drawText(lbl, topLeft = Offset(tx, PAD_T + h + 6f))
         }
 
         // ── Scrubber ──────────────────────────────────────────────────────────
         val sel = scrubberMs
         if (sel != null && sel in viewport.startMs..viewport.endMs) {
-            val near = points.minByOrNull { abs(it.tMs - sel) }
+            val near = points.bucketAt(sel, lod)
             if (near != null) {
                 val x = xOf(near.tMs)
                 drawLine(Color(0x88FFFFFF), Offset(x, PAD_T), Offset(x, PAD_T + h), 1.5f)
@@ -348,7 +245,7 @@ fun MetricChart(
                 drawMarker(textMeasurer, x, PAD_T + 2f, valStr, pillColor, above = false, solidBg = true)
 
                 if (showTimeLabel) {
-                    val title2 = tooltipTitle(near.bucketStart, lod)
+                    val title2 = labels.tooltip(lod, near.bucketStart)
                     val m = textMeasurer.measure(title2, TextStyle(fontSize = 11.sp, color = Color(0xFFE8EAED)))
                     // Right-align to the plot edge (not the canvas), clear of the axis gutter
                     val plotRight = size.width - PAD_R
@@ -358,196 +255,4 @@ fun MetricChart(
             }
         }
     }
-}
-
-// ── Gesture math ──────────────────────────────────────────────────────────
-
-private fun scrubAt(x: Float, widthPx: Int, vp: Viewport, onScrub: (Long?) -> Unit) {
-    val w = widthPx - PAD_L - PAD_R
-    if (w <= 0) return
-    val frac = ((x - PAD_L) / w).coerceIn(0f, 1f)
-    onScrub(vp.startMs + (vp.span * frac).toLong())
-}
-
-private fun panBy(
-    dxPx: Float, widthPx: Int, vp: Viewport, dataMin: Long, dataMax: Long,
-    onChange: (Viewport) -> Unit
-) {
-    val span = vp.span
-    val msPerPx = span.toDouble() / widthPx
-    val panMs = (dxPx * msPerPx).toLong()
-    var newStart = vp.startMs - panMs   // drag right → reveal older data
-    var newEnd = vp.endMs - panMs
-    val margin = span / 10
-    if (newStart < dataMin - margin) { newStart = dataMin - margin; newEnd = newStart + span }
-    if (newEnd > dataMax + margin) { newEnd = dataMax + margin; newStart = newEnd - span }
-    onChange(Viewport(newStart, newEnd))
-}
-
-private fun applyTransform(
-    centroidX: Float, panX: Float, zoom: Float, widthPx: Int,
-    vp: Viewport, minSpan: Long, maxSpan: Long, dataMin: Long, dataMax: Long,
-    onChange: (Viewport) -> Unit
-) {
-    val span = vp.span
-    val msPerPx = span.toDouble() / widthPx
-    val focalFrac = (centroidX / widthPx).coerceIn(0f, 1f)
-    val focalMs = vp.startMs + (span * focalFrac).toLong()
-    val newSpan = (span / zoom).toLong().coerceIn(minSpan, maxSpan)
-    val panMs = (panX * msPerPx).toLong()
-    var newStart = focalMs - (newSpan * focalFrac).toLong() - panMs
-    var newEnd = newStart + newSpan
-    val margin = newSpan / 10
-    if (newStart < dataMin - margin) { newStart = dataMin - margin; newEnd = newStart + newSpan }
-    if (newEnd > dataMax + margin) { newEnd = dataMax + margin; newStart = newEnd - newSpan }
-    onChange(Viewport(newStart, newEnd))
-}
-
-// ── Drawing helpers ───────────────────────────────────────────────────────
-
-/**
- * Smooth curve through points using a monotone cubic Hermite spline
- * (Fritsch–Carlson). Unlike a plain cubic it never overshoots or wiggles
- * between samples — where the data is monotone, so is the curve.
- */
-private fun smoothPath(pts: List<Offset>): Path {
-    val path = Path()
-    val n = pts.size
-    if (n == 0) return path
-    path.moveTo(pts[0].x, pts[0].y)
-    if (n == 1) return path
-    if (n == 2) { path.lineTo(pts[1].x, pts[1].y); return path }
-
-    val dx = FloatArray(n - 1)
-    val slope = FloatArray(n - 1)
-    for (i in 0 until n - 1) {
-        dx[i] = pts[i + 1].x - pts[i].x
-        slope[i] = if (dx[i] != 0f) (pts[i + 1].y - pts[i].y) / dx[i] else 0f
-    }
-
-    // Initial tangents: average of neighbouring secants, flat at local extrema
-    val m = FloatArray(n)
-    m[0] = slope[0]
-    m[n - 1] = slope[n - 2]
-    for (i in 1 until n - 1) {
-        m[i] = if (slope[i - 1] * slope[i] <= 0f) 0f else (slope[i - 1] + slope[i]) / 2f
-    }
-
-    // Constrain tangents so each segment stays monotone (no overshoot)
-    for (i in 0 until n - 1) {
-        if (slope[i] == 0f) {
-            m[i] = 0f; m[i + 1] = 0f
-        } else {
-            val a = m[i] / slope[i]
-            val b = m[i + 1] / slope[i]
-            val s = a * a + b * b
-            if (s > 9f) {
-                val t = 3f / sqrt(s)
-                m[i] = t * a * slope[i]
-                m[i + 1] = t * b * slope[i]
-            }
-        }
-    }
-
-    // Emit each segment as a cubic Bézier from the Hermite tangents
-    for (i in 0 until n - 1) {
-        val d = dx[i]
-        path.cubicTo(
-            pts[i].x + d / 3f, pts[i].y + m[i] * d / 3f,
-            pts[i + 1].x - d / 3f, pts[i + 1].y - m[i + 1] * d / 3f,
-            pts[i + 1].x, pts[i + 1].y
-        )
-    }
-    return path
-}
-
-private fun DrawScope.drawScrubDot(x: Float, y: Float, accent: Color) {
-    drawCircle(Color.White, 5f, Offset(x, y))
-    drawCircle(accent, 3f, Offset(x, y))
-}
-
-private fun DrawScope.drawMarker(
-    textMeasurer: androidx.compose.ui.text.TextMeasurer,
-    cx: Float, cy: Float, text: String, accent: Color, above: Boolean, solidBg: Boolean = false
-) {
-    drawCircle(Color.White, 4f, Offset(cx, cy))
-    val m = textMeasurer.measure(text, TextStyle(fontSize = 11.sp, color = Color.White, fontWeight = FontWeight.SemiBold))
-    val padX = 7f; val padY = 3f
-    val boxW = m.size.width + padX * 2; val boxH = m.size.height + padY * 2
-    val bx = (cx - boxW / 2).coerceIn(0f, maxOf(0f, size.width - boxW))
-    // Keep the pill inside the plot band so it never overlaps the header title or axis labels
-    val by = (if (above) cy - boxH - 8f else cy + 8f)
-        .coerceIn(PAD_T, maxOf(PAD_T, size.height - PAD_B - boxH))
-    drawRoundRect(if (solidBg) accent else accent.copy(alpha = 0.92f),
-        topLeft = Offset(bx, by), size = Size(boxW, boxH), cornerRadius = CornerRadius(boxH / 2, boxH / 2))
-    drawText(m, topLeft = Offset(bx + padX, by + padY))
-}
-
-// ── Aggregation ─────────────────────────────────────────────────────────────
-
-private fun buildPoints(readings: List<Reading>, startMs: Long, endMs: Long, lod: Lod, metric: Metric): List<Point> {
-    var lo = lowerBound(readings, startMs) - 1
-    if (lo < 0) lo = 0
-    var hi = lowerBound(readings, endMs)
-    if (hi < readings.size) hi++
-    if (lo >= hi) return emptyList()
-    val slice = readings.subList(lo, hi.coerceAtMost(readings.size))
-
-    fun loOf(r: Reading) = if (metric == Metric.TEMP) r.tempMinC else r.humMin.toFloat()
-    fun hiOf(r: Reading) = if (metric == Metric.TEMP) r.tempMaxC else r.humMax.toFloat()
-
-    if (lod == Lod.HOURLY) {
-        return slice.map { Point(it.timestampMs, it.timestampMs, loOf(it), hiOf(it)) }
-    }
-
-    val cal = Calendar.getInstance()
-    fun bucketStart(ms: Long): Long {
-        cal.timeInMillis = ms
-        cal.set(Calendar.MILLISECOND, 0); cal.set(Calendar.SECOND, 0)
-        cal.set(Calendar.MINUTE, 0); cal.set(Calendar.HOUR_OF_DAY, 0)
-        if (lod == Lod.MONTHLY) cal.set(Calendar.DAY_OF_MONTH, 1)
-        return cal.timeInMillis
-    }
-
-    val out = ArrayList<Point>()
-    var curKey = Long.MIN_VALUE
-    var mn = Float.MAX_VALUE; var mx = -Float.MAX_VALUE
-    fun flush() {
-        if (curKey != Long.MIN_VALUE) {
-            val mid = if (lod == Lod.MONTHLY) curKey + 15 * DAY else curKey + 12 * HOUR
-            out.add(Point(mid, curKey, mn, mx))
-        }
-    }
-    for (r in slice) {
-        val key = bucketStart(r.timestampMs)
-        if (key != curKey) { flush(); curKey = key; mn = Float.MAX_VALUE; mx = -Float.MAX_VALUE }
-        if (loOf(r) < mn) mn = loOf(r)
-        if (hiOf(r) > mx) mx = hiOf(r)
-    }
-    flush()
-    return out
-}
-
-private fun lowerBound(readings: List<Reading>, tMs: Long): Int {
-    var lo = 0; var hi = readings.size
-    while (lo < hi) {
-        val mid = (lo + hi) ushr 1
-        if (readings[mid].timestampMs < tMs) lo = mid + 1 else hi = mid
-    }
-    return lo
-}
-
-private fun timeAxisFormat(lod: Lod): SimpleDateFormat = when (lod) {
-    Lod.HOURLY -> SimpleDateFormat("HH:mm", Locale.getDefault())
-    Lod.DAILY -> SimpleDateFormat("d MMM", Locale.getDefault())
-    Lod.MONTHLY -> SimpleDateFormat("MMM yy", Locale.getDefault())
-}
-
-private fun tooltipTitle(bucketStart: Long, lod: Lod): String {
-    val fmt = when (lod) {
-        Lod.HOURLY -> SimpleDateFormat("EEE d MMM, HH:00", Locale.getDefault())
-        Lod.DAILY -> SimpleDateFormat("EEE d MMM yyyy", Locale.getDefault())
-        Lod.MONTHLY -> SimpleDateFormat("MMMM yyyy", Locale.getDefault())
-    }
-    return fmt.format(Date(bucketStart))
 }
