@@ -111,6 +111,37 @@ class SeriesLookupTest {
             points.intersects(at(19), at(21)))
     }
 
+    // ── Lookups independent of what is on screen ─────────────────────────────
+
+    /**
+     * Scrolling the chart away from the marker must not blank its reading — the
+     * readout looks values up against the whole history, not the visible slice.
+     */
+    @Test fun aReadingResolvesEvenWhenScrolledOffScreen() {
+        val data = SeriesData(recentOnly, Metric.TEMP)
+        val marker = at(20, 10)
+
+        // The slice on screen is a week away and contains nothing near the marker
+        assertNull(data.visible(Lod.HOURLY, at(13), at(14)).bucketAt(marker, Lod.HOURLY))
+        // ...but the device did record then, so the readout still finds it
+        val bucket = data.bucketAt(marker, Lod.HOURLY)
+        assertNotNull(bucket)
+        assertEquals(marker, bucket!!.tMs)
+    }
+
+    @Test fun theOffScreenLookupStillRefusesTimesWithNoData() {
+        val data = SeriesData(recentOnly, Metric.TEMP)
+        assertNull("a week before any reading", data.bucketAt(at(13, 12), Lod.HOURLY))
+        assertNull("well after the last one", data.bucketAt(at(27, 12), Lod.HOURLY))
+    }
+
+    @Test fun theOffScreenLookupWorksAtEveryZoomLevel() {
+        val data = SeriesData(recentOnly, Metric.TEMP)
+        assertNotNull(data.bucketAt(at(20, 10), Lod.HOURLY))
+        assertNotNull(data.bucketAt(at(20, 10), Lod.DAILY))
+        assertNotNull(data.bucketAt(at(20, 10), Lod.MONTHLY))
+    }
+
     @Test fun anEmptySliceIntersectsNothing() {
         assertFalse(emptyList<SeriesPoint>().intersects(at(1), at(2)))
         assertNull(emptyList<SeriesPoint>().bucketAt(at(1), Lod.HOURLY))

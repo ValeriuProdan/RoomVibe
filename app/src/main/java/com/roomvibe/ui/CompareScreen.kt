@@ -237,9 +237,9 @@ fun CompareScreen(
                 }
             }
 
-            if (series.isNotEmpty() && scrubberMs != null) {
+            if (prepared.isNotEmpty() && scrubberMs != null) {
                 Spacer(Modifier.height(8.dp))
-                ScrubReadout(series, scrubberMs!!, metric, unit, lod, fahrenheit)
+                ScrubReadout(prepared, scrubberMs!!, metric, unit, lod, fahrenheit)
             }
 
             Spacer(Modifier.height(8.dp))
@@ -301,21 +301,24 @@ private fun MetricSwitch(selected: Int, onSelect: (Int) -> Unit) {
  */
 @Composable
 private fun ScrubReadout(
-    series: List<CompareSeries>,
+    devices: List<Prepared>,
     scrubberMs: Long,
     metric: Metric,
     unit: String,
     lod: Lod,
     fahrenheit: Boolean
 ) {
+    // Looked up against each device's whole history rather than the slice on
+    // screen, so the reading stays put when the chart is scrolled away from the
+    // marker — it only changes when a new point is tapped.
+    //
     // Every selected device keeps a row, whether or not it recorded anything at
-    // the marker — dragging across the start of one device's history shouldn't
-    // make the rows under it jump. A device only carries a bucket where it
-    // actually has data; elsewhere it reads "no data" rather than borrowing the
-    // nearest value it happens to have, which could be days away.
-    val rows = remember(series, scrubberMs, lod) {
-        series
-            .map { s -> ReadoutRow(s.label, s.style, s.points.bucketAt(scrubberMs, lod)) }
+    // the marker, so dragging across the start of one device's history doesn't
+    // make the rows under it jump. A device without data there reads "no data"
+    // rather than borrowing the nearest value it happens to have.
+    val rows = remember(devices, scrubberMs, lod) {
+        devices
+            .map { d -> ReadoutRow(d.label, d.style, d.data.bucketAt(scrubberMs, lod)) }
             .rankedForReadout()
     }
     if (rows.isEmpty()) return

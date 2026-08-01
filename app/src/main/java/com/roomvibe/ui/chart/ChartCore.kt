@@ -156,6 +156,16 @@ class SeriesData(
         val (lo, hi) = sliceBounds(b.size, startMs, endMs) { i -> b[i].tMs }
         return if (lo >= hi) emptyList() else b.subList(lo, hi)
     }
+
+    /**
+     * The bucket describing [tMs] anywhere in this device's history, independent of
+     * what is currently on screen — so a reading stays readable after the chart is
+     * scrolled away from it.
+     */
+    fun bucketAt(tMs: Long, lod: Lod): SeriesPoint? {
+        val tolerance = scrubToleranceMs(lod)
+        return visible(lod, tMs - tolerance, tMs + tolerance).bucketAt(tMs, lod)
+    }
 }
 
 @Composable
