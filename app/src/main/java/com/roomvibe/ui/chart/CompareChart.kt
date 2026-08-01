@@ -159,14 +159,6 @@ fun CompareChart(
             )
         }
 
-        // Subtle hint marking the lower pan zone
-        val panZoneTop = PAD_T + h * 0.8f
-        drawLine(Color(0x10FFFFFF), Offset(PAD_L, panZoneTop), Offset(PAD_L + w, panZoneTop), 1f,
-            pathEffect = PathEffect.dashPathEffect(floatArrayOf(3f, 7f)))
-        val hint = textMeasurer.measure("⇄ drag here to scroll through time",
-            TextStyle(fontSize = 9.sp, color = Color(0x44FFFFFF)))
-        drawText(hint, topLeft = Offset(PAD_L + (w - hint.size.width) / 2f, PAD_T + h - hint.size.height - 2f))
-
         // Direct labels: a few lines name themselves, so reading the chart doesn't
         // need a trip to the legend.
         if (plotted.size in 2..MAX_DIRECT_LABELS) {

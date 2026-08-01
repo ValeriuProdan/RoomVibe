@@ -287,7 +287,7 @@ fun SensorDetailScreen(
             }
 
             Text(
-                "Upper area: move marker · Lower area: scroll time · Two fingers: zoom",
+                "Tap to place the marker · Drag to scroll time · Two fingers: zoom",
                 style = MaterialTheme.typography.labelSmall, color = TextLo,
                 modifier = Modifier.align(Alignment.CenterHorizontally)
             )

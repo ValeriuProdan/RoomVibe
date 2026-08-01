@@ -254,7 +254,7 @@ fun CompareScreen(
             DevicePicker(state = state, onToggle = onToggle, onAll = onAll, onNone = onNone)
 
             Text(
-                "Upper area: move marker · Lower area: scroll time · Two fingers: zoom",
+                "Tap to place the marker · Drag to scroll time · Two fingers: zoom",
                 style = MaterialTheme.typography.labelSmall, color = TextLo,
                 // Bottom gap keeps the hint clear of the page dots.
                 modifier = Modifier.align(Alignment.CenterHorizontally)
