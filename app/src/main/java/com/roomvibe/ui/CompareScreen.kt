@@ -32,6 +32,7 @@ import com.roomvibe.ui.chart.CompareSeries
 import com.roomvibe.ui.chart.Lod
 import com.roomvibe.ui.chart.Metric
 import com.roomvibe.ui.chart.SeriesData
+import com.roomvibe.ui.chart.SeriesPoint
 import com.roomvibe.ui.chart.SeriesStyle
 import com.roomvibe.ui.chart.Viewport
 import com.roomvibe.ui.chart.bucketAt
@@ -52,6 +53,24 @@ private val ScreenBg = Color(0xFF0E0F12)
 private val CardBg = Color(0xFF1B1D21)
 private val TextHi = Color(0xFFECEFF1)
 private val TextLo = Color(0xFF9AA0A6)
+
+/** One line of the marker readout. A null [bucket] means "recorded nothing here". */
+internal data class ReadoutRow(
+    val label: String,
+    val style: SeriesStyle,
+    val bucket: SeriesPoint?
+)
+
+/**
+ * Devices that measured something rank warmest first; the rest park at the bottom
+ * in the order they came in, which is fixed palette order.
+ *
+ * Keeping the no-data devices in the list at all — rather than dropping them — is
+ * what stops rows jumping around as the marker crosses the start of one device's
+ * history.
+ */
+internal fun List<ReadoutRow>.rankedForReadout(): List<ReadoutRow> =
+    sortedWith(compareBy({ it.bucket == null }, { -(it.bucket?.mid ?: 0f) }))
 
 /** A device's identity plus its bucketed history, before it is cut to a viewport. */
 private data class Prepared(
@@ -288,21 +307,22 @@ private fun ScrubReadout(
     lod: Lod,
     fahrenheit: Boolean
 ) {
-    data class Row(val label: String, val style: SeriesStyle, val mid: Float, val lo: Float, val hi: Float)
-
-    // A device is listed only where it actually recorded something. Devices whose
-    // history doesn't reach this far back drop out rather than reporting the
-    // nearest value they happen to have, which could be days away.
+    // Every selected device keeps a row, whether or not it recorded anything at
+    // the marker — dragging across the start of one device's history shouldn't
+    // make the rows under it jump. A device only carries a bucket where it
+    // actually has data; elsewhere it reads "no data" rather than borrowing the
+    // nearest value it happens to have, which could be days away.
     val rows = remember(series, scrubberMs, lod) {
-        series.mapNotNull { s ->
-            val near = s.points.bucketAt(scrubberMs, lod) ?: return@mapNotNull null
-            Row(s.label, s.style, near.mid, near.lo, near.hi)
-        }.sortedByDescending { it.mid }
+        series
+            .map { s -> ReadoutRow(s.label, s.style, s.points.bucketAt(scrubberMs, lod)) }
+            .rankedForReadout()
     }
     if (rows.isEmpty()) return
 
     fun show(v: Float) = if (metric == Metric.TEMP && fahrenheit) v * 9f / 5f + 32f else v
-    val spread = rows.first().mid - rows.last().mid
+
+    val measured = rows.mapNotNull { it.bucket }
+    val spread = if (measured.size > 1) measured.maxOf { it.mid } - measured.minOf { it.mid } else null
 
     Surface(shape = RoundedCornerShape(16.dp), color = CardBg, modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
@@ -315,9 +335,11 @@ private fun ScrubReadout(
                     if (lod == Lod.HOURLY) fmtDateTime(scrubberMs) else fmtDate(scrubberMs),
                     style = MaterialTheme.typography.labelMedium, color = TextLo
                 )
-                if (rows.size > 1) {
+                // Only meaningful across devices that actually measured something here.
+                if (spread != null) {
                     Text(
-                        "spread %.1f%s".format(show(rows.first().mid) - show(rows.last().mid), unit),
+                        "spread %.1f%s".format(
+                            show(measured.maxOf { it.mid }) - show(measured.minOf { it.mid }), unit),
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = if (abs(spread) >= 1f) MaterialTheme.colorScheme.primary else TextLo
@@ -328,24 +350,32 @@ private fun ScrubReadout(
             // Capped so a long device list can't squeeze the chart off the screen.
             Column(Modifier.heightIn(max = 152.dp).verticalScroll(rememberScrollState())) {
                 rows.forEach { row ->
+                    val bucket = row.bucket
                     Row(
                         Modifier.fillMaxWidth().padding(vertical = 2.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        SeriesSwatch(row.style, selected = true)
+                        // A dimmed swatch and label mark a device that was simply
+                        // not recording here, matching how its chip reads.
+                        SeriesSwatch(row.style, selected = bucket != null)
                         Spacer(Modifier.width(8.dp))
-                        Text(row.label, style = MaterialTheme.typography.bodySmall, color = TextHi,
+                        Text(row.label, style = MaterialTheme.typography.bodySmall,
+                            color = if (bucket != null) TextHi else TextLo,
                             maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-                        if (lod != Lod.HOURLY) {
-                            Text(
-                                "%.1f–%.1f".format(show(row.lo), show(row.hi)),
-                                style = MaterialTheme.typography.labelSmall, color = TextLo
-                            )
-                            Spacer(Modifier.width(8.dp))
+                        if (bucket == null) {
+                            Text("no data", style = MaterialTheme.typography.labelMedium, color = TextLo)
+                        } else {
+                            if (lod != Lod.HOURLY) {
+                                Text(
+                                    "%.1f–%.1f".format(show(bucket.lo), show(bucket.hi)),
+                                    style = MaterialTheme.typography.labelSmall, color = TextLo
+                                )
+                                Spacer(Modifier.width(8.dp))
+                            }
+                            Text("%.1f%s".format(show(bucket.mid), unit),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold, color = TextHi)
                         }
-                        Text("%.1f%s".format(show(row.mid), unit),
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold, color = TextHi)
                     }
                 }
             }
