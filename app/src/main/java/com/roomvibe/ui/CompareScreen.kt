@@ -37,6 +37,7 @@ import com.roomvibe.ui.chart.SeriesStyle
 import com.roomvibe.ui.chart.Viewport
 import com.roomvibe.ui.chart.bucketAt
 import com.roomvibe.ui.chart.lodFor
+import com.roomvibe.ui.chart.rememberTimeLabels
 import com.roomvibe.ui.chart.seriesStyle
 import com.roomvibe.ui.chart.zoomLabel
 import com.roomvibe.viewmodel.CompareUiState
@@ -321,7 +322,9 @@ private fun ScrubReadout(
 
     fun show(v: Float) = if (metric == Metric.TEMP && fahrenheit) v * 9f / 5f + 32f else v
 
+    val labels = rememberTimeLabels()
     val measured = rows.mapNotNull { it.bucket }
+    val anchor = measured.minByOrNull { abs(it.tMs - scrubberMs) }
     val spread = if (measured.size > 1) measured.maxOf { it.mid } - measured.minOf { it.mid } else null
 
     Surface(shape = RoundedCornerShape(16.dp), color = CardBg, modifier = Modifier.fillMaxWidth()) {
@@ -331,8 +334,11 @@ private fun ScrubReadout(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                // The reading the marker snapped to, so this agrees with the
+                // timestamp drawn on the chart rather than with the raw finger
+                // position between two readings.
                 Text(
-                    if (lod == Lod.HOURLY) fmtDateTime(scrubberMs) else fmtDate(scrubberMs),
+                    labels.tooltip(lod, anchor?.bucketStart ?: scrubberMs),
                     style = MaterialTheme.typography.labelMedium, color = TextLo
                 )
                 // Only meaningful across devices that actually measured something here.
@@ -511,8 +517,4 @@ private fun rangeLabel(startMs: Long, endMs: Long): String {
     return "${fmt.format(Date(startMs))} – ${fmt.format(Date(endMs))}"
 }
 
-private fun fmtDateTime(ms: Long) =
-    SimpleDateFormat("EEE d MMM, HH:mm", Locale.getDefault()).format(Date(ms))
 
-private fun fmtDate(ms: Long) =
-    SimpleDateFormat("EEE d MMM yyyy", Locale.getDefault()).format(Date(ms))

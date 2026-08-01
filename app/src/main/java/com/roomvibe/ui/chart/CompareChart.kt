@@ -187,14 +187,27 @@ fun CompareChart(
         // to be named and sorted; here we only mark where each line was crossed.
         val sel = scrubberMs
         if (sel != null && sel in viewport.startMs..viewport.endMs) {
-            drawLine(Color(0x88FFFFFF), Offset(xOf(sel), PAD_T), Offset(xOf(sel), PAD_T + h), 1.5f)
-            // A device only gets a dot where it actually recorded something —
-            // never on the far-off overscan point it may have been sliced with.
+            // Snap the crosshair to the nearest reading rather than leaving it
+            // wherever the finger stopped, so it lands on a dot instead of
+            // floating between two of them.
             var anchor: SeriesPoint? = null
+            var closest = Long.MAX_VALUE
+            for (s in plotted) {
+                val near = s.points.bucketAt(sel, lod) ?: continue
+                val gap = abs(near.tMs - sel)
+                if (gap < closest) { closest = gap; anchor = near }
+            }
+
+            val lineX = xOf(anchor?.tMs ?: sel)
+            drawLine(Color(0x88FFFFFF), Offset(lineX, PAD_T), Offset(lineX, PAD_T + h), 1.5f)
+
+            // Each dot stays on its own device's reading. At day zoom every device
+            // shares one bucket so they all land on the line; at hourly zoom they
+            // genuinely aren't simultaneous — each sensor keeps its own hourly
+            // clock — and pretending otherwise would misplace the value.
             for (s in plotted) {
                 val near = s.points.bucketAt(sel, lod) ?: continue
                 drawScrubDot(xOf(near.tMs), yOf(near.mid), s.style.color)
-                if (anchor == null) anchor = near
             }
             anchor?.let {
                 val stamp = textMeasurer.measure(
