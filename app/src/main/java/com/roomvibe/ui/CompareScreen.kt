@@ -1,5 +1,7 @@
 package com.roomvibe.ui
 
+import android.content.res.Configuration
+
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -12,6 +14,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Timeline
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.listSaver
@@ -21,9 +24,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.roomvibe.data.AppSettings
@@ -49,6 +56,9 @@ import kotlin.math.abs
 
 private const val HOUR = 3_600_000L
 private const val DAY = 24 * HOUR
+
+/** Room left along the bottom for the page dots HomePager draws over this screen. */
+private val PAGER_DOTS_SPACE = 32.dp
 
 private val ScreenBg = Color(0xFF0E0F12)
 private val CardBg = Color(0xFF1B1D21)
@@ -104,6 +114,7 @@ fun CompareScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val fahrenheit by AppSettings.get(context).fahrenheit.collectAsStateWithLifecycle()
+    val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
 
     var viewport by rememberSaveable(stateSaver = ViewportSaver) { mutableStateOf<Viewport?>(null) }
     var scrubberMs by rememberSaveable { mutableStateOf<Long?>(null) }
@@ -157,25 +168,93 @@ fun CompareScreen(
         }
     }
 
+    // Remembered rather than passed as `viewModel::toggle` — a bare method
+    // reference is a new object every recomposition, which would make the picker
+    // rebuild all its chips on every frame of a drag.
+    val onToggle = remember(viewModel) { { address: String -> viewModel.toggle(address) } }
+    val onAll = remember(viewModel) { { viewModel.selectAll() } }
+    val onNone = remember(viewModel) { { viewModel.selectNone() } }
+
+    // The plot itself, plus the empty states that stand in for it. Shared so
+    // landscape can hand it the whole screen instead of a slot in a column.
+    val chartBody: @Composable (Modifier) -> Unit = { m ->
+        Box(m) {
+            when {
+                state.sensors.isEmpty() ->
+                    EmptyHint("No sensors yet", "Swipe back and tap + to add one.")
+                vp == null && state.isLoading ->
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                    }
+                state.selected.isEmpty() ->
+                    EmptyHint("Nothing selected", "Tick devices to plot them together.")
+                vp == null ->
+                    EmptyHint("No data yet", "Sync a sensor to see its history here.")
+                else -> CompareChart(
+                    unit = unit,
+                    metric = metric,
+                    series = series,
+                    viewport = vp,
+                    scrubberMs = scrubberMs,
+                    dataMin = oldest ?: vp.startMs,
+                    dataMax = newest ?: vp.endMs,
+                    fahrenheit = fahrenheit,
+                    onViewportChange = { viewport = it },
+                    onScrub = { scrubberMs = it },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        }
+    }
+
     Scaffold(
         containerColor = ScreenBg,
         topBar = {
-            TopAppBar(
-                title = { Text("Compare") },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back to sensors")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = ScreenBg,
-                    titleContentColor = Color.White,
-                    navigationIconContentColor = Color.White,
-                    actionIconContentColor = Color.White
+            // Landscape floats its controls over the chart instead — see below.
+            if (!isLandscape) {
+                TopAppBar(
+                    title = { Text("Compare") },
+                    navigationIcon = {
+                        IconButton(onClick = onBack) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back to sensors")
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = ScreenBg,
+                        titleContentColor = Color.White,
+                        navigationIconContentColor = Color.White,
+                        actionIconContentColor = Color.White
+                    )
                 )
-            )
+            }
         }
     ) { pad ->
+        if (isLandscape) {
+            // There isn't the height for a stacked layout here — the chart would be
+            // squeezed to nothing — so it takes the whole screen and everything else
+            // floats over it, matching the single-sensor screen.
+            CompareLandscape(
+                pad = pad,
+                chartBody = chartBody,
+                state = state,
+                prepared = prepared,
+                metricIndex = metricIndex,
+                onMetric = { metricIndex = it },
+                zoom = vp?.let { zoomLabel(it.span) },
+                range = vp?.let { rangeLabel(it.startMs, it.endMs) },
+                scrubberMs = scrubberMs,
+                metric = metric,
+                unit = unit,
+                lod = lod,
+                fahrenheit = fahrenheit,
+                onToggleDevice = onToggle,
+                onAll = onAll,
+                onNone = onNone,
+                onBack = onBack
+            )
+            return@Scaffold
+        }
+
         Column(Modifier.padding(pad).fillMaxSize().background(ScreenBg).padding(horizontal = 12.dp)) {
 
             MetricSwitch(selected = metricIndex, onSelect = { metricIndex = it })
@@ -208,58 +287,263 @@ fun CompareScreen(
                 shape = RoundedCornerShape(16.dp),
                 color = CardBg
             ) {
-                Box(Modifier.fillMaxSize().padding(8.dp)) {
-                    when {
-                        state.sensors.isEmpty() ->
-                            EmptyHint("No sensors yet", "Swipe back and tap + to add one.")
-                        vp == null && state.isLoading ->
-                            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
-                            }
-                        state.selected.isEmpty() ->
-                            EmptyHint("Nothing selected", "Tick devices below to plot them together.")
-                        vp == null ->
-                            EmptyHint("No data yet", "Sync a sensor to see its history here.")
-                        else -> CompareChart(
-                            unit = unit,
-                            metric = metric,
-                            series = series,
-                            viewport = vp,
-                            scrubberMs = scrubberMs,
-                            dataMin = oldest ?: vp.startMs,
-                            dataMax = newest ?: vp.endMs,
-                            fahrenheit = fahrenheit,
-                            onViewportChange = { viewport = it },
-                            onScrub = { scrubberMs = it },
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
-                }
+                chartBody(Modifier.fillMaxSize().padding(8.dp))
             }
 
-            if (series.isNotEmpty() && scrubberMs != null) {
+            if (prepared.isNotEmpty() && scrubberMs != null) {
                 Spacer(Modifier.height(8.dp))
-                ScrubReadout(series, scrubberMs!!, metric, unit, lod, fahrenheit)
+                ScrubReadout(prepared, scrubberMs!!, metric, unit, lod, fahrenheit)
             }
 
             Spacer(Modifier.height(8.dp))
 
-            // Remembered rather than passed as `viewModel::toggle` — a bare method
-            // reference is a new object every recomposition, which would make the
-            // picker rebuild all its chips on every frame of a drag.
-            val onToggle = remember(viewModel) { { address: String -> viewModel.toggle(address) } }
-            val onAll = remember(viewModel) { { viewModel.selectAll() } }
-            val onNone = remember(viewModel) { { viewModel.selectNone() } }
-
             DevicePicker(state = state, onToggle = onToggle, onAll = onAll, onNone = onNone)
 
             Text(
-                "Upper area: move marker · Lower area: scroll time · Two fingers: zoom",
+                "Tap to place the marker · Drag to scroll time · Two fingers: zoom",
                 style = MaterialTheme.typography.labelSmall, color = TextLo,
                 // Bottom gap keeps the hint clear of the page dots.
                 modifier = Modifier.align(Alignment.CenterHorizontally)
                     .padding(top = 6.dp, bottom = 32.dp)
             )
+        }
+    }
+}
+
+/**
+ * Landscape gives the chart the whole screen. There is no height here for the
+ * portrait stack — metric switch, chart, readout and picker together leave the
+ * plot a few pixels tall — so everything except the plot floats over it, and the
+ * device picker hides behind a button until it's wanted.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun CompareLandscape(
+    pad: PaddingValues,
+    chartBody: @Composable (Modifier) -> Unit,
+    state: CompareUiState,
+    prepared: List<Prepared>,
+    metricIndex: Int,
+    onMetric: (Int) -> Unit,
+    zoom: String?,
+    range: String?,
+    scrubberMs: Long?,
+    metric: Metric,
+    unit: String,
+    lod: Lod,
+    fahrenheit: Boolean,
+    onToggleDevice: (String) -> Unit,
+    onAll: () -> Unit,
+    onNone: () -> Unit,
+    onBack: () -> Unit
+) {
+    var showDevices by rememberSaveable { mutableStateOf(false) }
+    val density = LocalDensity.current
+    // Measured from the bottom overlay so the plot stops above it rather than
+    // running underneath — the readout wraps with the device count, so this can't
+    // be a fixed number.
+    var bottomOverlay by remember { mutableStateOf(0.dp) }
+    val showReadout = prepared.isNotEmpty() && scrubberMs != null && !showDevices
+
+    Box(Modifier.padding(pad).fillMaxSize().background(ScreenBg)) {
+        chartBody(Modifier.fillMaxSize().padding(4.dp).padding(bottom = bottomOverlay))
+
+        // Controls (top-left), clear of any display cutout
+        Surface(
+            modifier = Modifier.align(Alignment.TopStart).displayCutoutPadding().padding(8.dp),
+            shape = RoundedCornerShape(50),
+            color = Color.Black.copy(alpha = 0.45f)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(end = 4.dp)) {
+                IconButton(onClick = onBack) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back to sensors", tint = Color.White)
+                }
+                listOf("Temperature", "Humidity").forEachIndexed { i, label ->
+                    val isSel = metricIndex == i
+                    Surface(
+                        onClick = { onMetric(i) },
+                        shape = RoundedCornerShape(50),
+                        color = if (isSel) Color.White.copy(alpha = 0.22f) else Color.Transparent
+                    ) {
+                        Text(
+                            label,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
+                            color = if (isSel) Color.White else Color.White.copy(alpha = 0.6f),
+                            fontWeight = if (isSel) FontWeight.SemiBold else FontWeight.Normal,
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
+                    if (i == 0) Spacer(Modifier.width(4.dp))
+                }
+                IconButton(onClick = { showDevices = !showDevices }) {
+                    Icon(
+                        Icons.Default.Tune,
+                        if (showDevices) "Hide devices" else "Choose devices",
+                        tint = if (showDevices) MaterialTheme.colorScheme.primary else Color.White
+                    )
+                }
+                // Zoom and range ride along here rather than in their own corner:
+                // the chart draws the marker's timestamp top-right, and a second
+                // pill there would sit on top of it.
+                if (zoom != null) {
+                    Spacer(Modifier.width(2.dp))
+                    Icon(Icons.Default.Timeline, null, Modifier.size(14.dp), tint = TextHi)
+                    Spacer(Modifier.width(4.dp))
+                    Text(zoom, style = MaterialTheme.typography.labelSmall, color = TextHi)
+                    if (range != null) {
+                        Spacer(Modifier.width(8.dp))
+                        Text(range, style = MaterialTheme.typography.labelSmall, color = TextLo)
+                    }
+                    Spacer(Modifier.width(10.dp))
+                }
+            }
+        }
+
+        // Everything that lives along the bottom, stacked and measured as one
+        // block: the marker readout, then room for the pager dots that HomePager
+        // draws over this screen.
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .onSizeChanged { bottomOverlay = with(density) { it.height.toDp() } }
+                .navigationBarsPadding()
+                .displayCutoutPadding()
+                .padding(horizontal = 8.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            if (showReadout) {
+                CompactReadout(
+                    devices = prepared,
+                    scrubberMs = scrubberMs,
+                    metric = metric,
+                    unit = unit,
+                    lod = lod,
+                    fahrenheit = fahrenheit
+                )
+            }
+            Spacer(Modifier.height(PAGER_DOTS_SPACE))
+        }
+
+        // Device picker, revealed by the controls button
+        if (showDevices) {
+            Surface(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .navigationBarsPadding()
+                    .displayCutoutPadding()
+                    .padding(8.dp)
+                    .widthIn(max = 420.dp),
+                shape = RoundedCornerShape(16.dp),
+                // Near-opaque: at 0.85 the lines showed through the chip labels.
+                color = Color(0xFF0E0F12).copy(alpha = 0.95f)
+            ) {
+                Box(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                    DevicePicker(
+                        state = state,
+                        onToggle = onToggleDevice,
+                        onAll = onAll,
+                        onNone = onNone,
+                        maxChipHeight = 96.dp
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The marker readout for landscape: one strip along the bottom rather than a card
+ * in the corner.
+ *
+ * It carries the same figures as the portrait card, laid out along the wide axis
+ * so it costs the chart a single row of height instead of a quarter of the plot.
+ * With more devices than fit it wraps upward rather than scrolling, since a
+ * sideways scroller here would fight the pager.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun CompactReadout(
+    devices: List<Prepared>,
+    scrubberMs: Long,
+    metric: Metric,
+    unit: String,
+    lod: Lod,
+    fahrenheit: Boolean,
+    modifier: Modifier = Modifier
+) {
+    val rows = remember(devices, scrubberMs, lod) {
+        devices
+            .map { d -> ReadoutRow(d.label, d.style, d.data.bucketAt(scrubberMs, lod)) }
+            .rankedForReadout()
+    }
+    if (rows.isEmpty()) return
+
+    fun show(v: Float) = if (metric == Metric.TEMP && fahrenheit) v * 9f / 5f + 32f else v
+
+    val labels = rememberTimeLabels()
+    val measured = rows.mapNotNull { it.bucket }
+    val anchor = measured.minByOrNull { abs(it.tMs - scrubberMs) }
+    val spread = if (measured.size > 1) measured.maxOf { it.mid } - measured.minOf { it.mid } else null
+
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(12.dp),
+        color = Color(0xFF0E0F12).copy(alpha = 0.92f)
+    ) {
+        FlowRow(
+            Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                labels.tooltip(lod, anchor?.bucketStart ?: scrubberMs),
+                style = MaterialTheme.typography.labelMedium, color = TextLo,
+                modifier = Modifier.align(Alignment.CenterVertically)
+            )
+            if (spread != null) {
+                Text(
+                    "spread %.1f%s".format(
+                        show(measured.maxOf { it.mid }) - show(measured.minOf { it.mid }), unit),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (abs(spread) >= 1f) MaterialTheme.colorScheme.primary else TextLo,
+                    modifier = Modifier.align(Alignment.CenterVertically)
+                )
+            }
+            rows.forEach { row ->
+                val bucket = row.bucket
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.align(Alignment.CenterVertically)
+                ) {
+                    SeriesSwatch(row.style, selected = bucket != null)
+                    Spacer(Modifier.width(5.dp))
+                    Text(
+                        row.label,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (bucket != null) TextHi else TextLo,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.widthIn(max = 110.dp)
+                    )
+                    Spacer(Modifier.width(5.dp))
+                    if (bucket == null) {
+                        Text("—", style = MaterialTheme.typography.labelMedium, color = TextLo)
+                    } else {
+                        Text(
+                            "%.1f%s".format(show(bucket.mid), unit),
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.SemiBold, color = TextHi
+                        )
+                        if (lod != Lod.HOURLY) {
+                            Spacer(Modifier.width(4.dp))
+                            Text(
+                                "%.0f–%.0f".format(show(bucket.lo), show(bucket.hi)),
+                                style = MaterialTheme.typography.labelSmall, color = TextLo
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -301,21 +585,25 @@ private fun MetricSwitch(selected: Int, onSelect: (Int) -> Unit) {
  */
 @Composable
 private fun ScrubReadout(
-    series: List<CompareSeries>,
+    devices: List<Prepared>,
     scrubberMs: Long,
     metric: Metric,
     unit: String,
     lod: Lod,
-    fahrenheit: Boolean
+    fahrenheit: Boolean,
+    modifier: Modifier = Modifier
 ) {
+    // Looked up against each device's whole history rather than the slice on
+    // screen, so the reading stays put when the chart is scrolled away from the
+    // marker — it only changes when a new point is tapped.
+    //
     // Every selected device keeps a row, whether or not it recorded anything at
-    // the marker — dragging across the start of one device's history shouldn't
-    // make the rows under it jump. A device only carries a bucket where it
-    // actually has data; elsewhere it reads "no data" rather than borrowing the
-    // nearest value it happens to have, which could be days away.
-    val rows = remember(series, scrubberMs, lod) {
-        series
-            .map { s -> ReadoutRow(s.label, s.style, s.points.bucketAt(scrubberMs, lod)) }
+    // the marker, so dragging across the start of one device's history doesn't
+    // make the rows under it jump. A device without data there reads "no data"
+    // rather than borrowing the nearest value it happens to have.
+    val rows = remember(devices, scrubberMs, lod) {
+        devices
+            .map { d -> ReadoutRow(d.label, d.style, d.data.bucketAt(scrubberMs, lod)) }
             .rankedForReadout()
     }
     if (rows.isEmpty()) return
@@ -327,7 +615,7 @@ private fun ScrubReadout(
     val anchor = measured.minByOrNull { abs(it.tMs - scrubberMs) }
     val spread = if (measured.size > 1) measured.maxOf { it.mid } - measured.minOf { it.mid } else null
 
-    Surface(shape = RoundedCornerShape(16.dp), color = CardBg, modifier = Modifier.fillMaxWidth()) {
+    Surface(shape = RoundedCornerShape(16.dp), color = CardBg, modifier = modifier.fillMaxWidth()) {
         Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
             Row(
                 Modifier.fillMaxWidth(),
@@ -396,7 +684,8 @@ private fun DevicePicker(
     state: CompareUiState,
     onToggle: (String) -> Unit,
     onAll: () -> Unit,
-    onNone: () -> Unit
+    onNone: () -> Unit,
+    maxChipHeight: Dp = 132.dp
 ) {
     if (state.sensors.isEmpty()) return
 
@@ -417,7 +706,7 @@ private fun DevicePicker(
         }
         // Wraps rather than scrolls sideways, so it never fights the page swipe.
         FlowRow(
-            modifier = Modifier.fillMaxWidth().heightIn(max = 132.dp).verticalScroll(rememberScrollState()),
+            modifier = Modifier.fillMaxWidth().heightIn(max = maxChipHeight).verticalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(6.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {

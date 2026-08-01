@@ -156,6 +156,16 @@ class SeriesData(
         val (lo, hi) = sliceBounds(b.size, startMs, endMs) { i -> b[i].tMs }
         return if (lo >= hi) emptyList() else b.subList(lo, hi)
     }
+
+    /**
+     * The bucket describing [tMs] anywhere in this device's history, independent of
+     * what is currently on screen — so a reading stays readable after the chart is
+     * scrolled away from it.
+     */
+    fun bucketAt(tMs: Long, lod: Lod): SeriesPoint? {
+        val tolerance = scrubToleranceMs(lod)
+        return visible(lod, tMs - tolerance, tMs + tolerance).bucketAt(tMs, lod)
+    }
 }
 
 @Composable
@@ -286,9 +296,14 @@ private inline fun lowerBound(size: Int, tMs: Long, timeAt: (Int) -> Long): Int 
 // ── Gestures ────────────────────────────────────────────────────────────────
 
 /**
- * The shared chart gesture model: the upper ~80 % of the plot drags the scrubber,
- * the lower strip pans through time, and two fingers zoom. Pointer events are
- * consumed so an enclosing pager doesn't steal the drag mid-gesture.
+ * The shared chart gesture model: tap anywhere to place the marker, drag anywhere
+ * to scroll through time, two fingers to zoom.
+ *
+ * Tapping and dragging share the whole plot, so the marker is placed on release
+ * and only when the touch never travelled past the touch slop — otherwise every
+ * pan would fling the marker to wherever the drag happened to start. Pointer
+ * events are consumed once a drag begins, so an enclosing pager can't steal it
+ * mid-gesture.
  */
 @Composable
 internal fun Modifier.chartGestures(
@@ -306,32 +321,33 @@ internal fun Modifier.chartGestures(
     val maxSpan = ((dataMax - dataMin).coerceAtLeast(DAY) * 1.1).toLong()
 
     return this.pointerInput(resetKey) {
+        val slop = viewConfiguration.touchSlop
         awaitEachGesture {
             val first = awaitFirstDown(requireUnconsumed = false)
-            val plotTop = PAD_T
-            val plotBottom = size.height - PAD_B
-            val panZoneTop = plotTop + (plotBottom - plotTop) * 0.8f
-            val panMode = first.position.y > panZoneTop
-
-            if (!panMode) scrubAt(first.position.x, size.width, vpState.value, onScrubState.value)
-            var prevX = first.position.x
+            val downX = first.position.x
+            var prevX = downX
+            var dragging = false
+            var pinched = false
             var prevCentroid: Offset? = null
             var prevSpread = 0f
+
             while (true) {
                 val event = awaitPointerEvent()
                 val pts = event.changes.filter { it.pressed }
                 if (pts.isEmpty()) break
                 if (pts.size == 1) {
                     val x = pts[0].position.x
-                    if (panMode) {
+                    // The slop distance is absorbed rather than applied, so the
+                    // chart doesn't jump when a drag is recognised.
+                    if (!dragging && abs(x - downX) > slop) dragging = true
+                    if (dragging) {
                         panBy(x - prevX, size.width, vpState.value, dataMin, dataMax, onVpState.value)
-                    } else {
-                        scrubAt(x, size.width, vpState.value, onScrubState.value)
+                        pts[0].consume()
                     }
                     prevX = x
-                    pts[0].consume()
                     prevCentroid = null; prevSpread = 0f
                 } else {
+                    pinched = true
                     val cx = pts.sumOf { it.position.x.toDouble() }.toFloat() / pts.size
                     val cy = pts.sumOf { it.position.y.toDouble() }.toFloat() / pts.size
                     val centroid = Offset(cx, cy)
@@ -347,6 +363,11 @@ internal fun Modifier.chartGestures(
                     prevX = centroid.x
                     pts.forEach { it.consume() }
                 }
+            }
+
+            // A touch that stayed put was a tap: place the marker where it landed.
+            if (!dragging && !pinched) {
+                scrubAt(downX, size.width, vpState.value, onScrubState.value)
             }
         }
     }
