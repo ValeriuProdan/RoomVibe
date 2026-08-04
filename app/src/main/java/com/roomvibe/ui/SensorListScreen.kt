@@ -8,8 +8,11 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items as lazyItems
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -137,6 +140,29 @@ fun SensorListScreen(
                     titleContentColor = BrandOrange
                 ),
                 actions = {
+                    if (state.isSyncingAll) {
+                        IconButton(
+                            onClick = { viewModel.cancelSyncAll() },
+                            modifier = Modifier
+                                .padding(4.dp)
+                                .size(40.dp)
+                                .background(Color(0xFFD32F2F), CircleShape)
+                        ) {
+                            Icon(Icons.Default.Close, "Stop syncing", tint = Color.White)
+                        }
+                    } else {
+                        IconButton(
+                            onClick = {
+                                withPermission(requiredConnectPermissions()) { viewModel.syncAll() }
+                            },
+                            enabled = state.sensors.isNotEmpty()
+                        ) {
+                            Icon(
+                                Icons.Default.Sync, "Sync all sensors",
+                                tint = if (state.sensors.isEmpty()) Color.White.copy(alpha = 0.4f) else Color.White
+                            )
+                        }
+                    }
                     // Also reachable by swiping left — this is the discoverable way in.
                     IconButton(onClick = onOpenCompare) {
                         Icon(Icons.Default.StackedLineChart, "Compare devices", tint = Color.White)
@@ -188,6 +214,10 @@ fun SensorListScreen(
             }
         }
     ) { pad ->
+      Column(Modifier.padding(pad).fillMaxSize()) {
+        if (state.isSyncingAll) {
+            SyncAllBanner(done = state.syncAllDone, total = state.syncAllTotal)
+        }
         // Two sensors per row.
         LazyVerticalGrid(
             columns = GridCells.Fixed(2),
@@ -195,7 +225,7 @@ fun SensorListScreen(
             contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 44.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.padding(pad).fillMaxSize()
+            modifier = Modifier.fillMaxSize()
         ) {
             if (state.sensors.isEmpty()) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
@@ -224,6 +254,7 @@ fun SensorListScreen(
                 )
             }
         }
+      }
     }
 
     if (showScanSheet) {
@@ -333,6 +364,33 @@ fun SensorListScreen(
                     Text("Working…")
                 }
             }
+        }
+    }
+}
+
+/**
+ * Progress across a "sync all" run. Each card already shows its own state, so
+ * this only answers "how far through the set are we" — useful when you start it
+ * and put the phone down.
+ */
+@Composable
+private fun SyncAllBanner(done: Int, total: Int) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+        shape = RoundedCornerShape(50),
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+    ) {
+        Row(
+            Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp,
+                color = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(10.dp))
+            Text(
+                "Syncing ${(done + 1).coerceAtMost(total)} of $total — one at a time",
+                style = MaterialTheme.typography.labelLarge
+            )
         }
     }
 }

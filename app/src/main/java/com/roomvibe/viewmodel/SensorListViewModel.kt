@@ -7,6 +7,7 @@ import com.roomvibe.ble.FoundDevice
 import com.roomvibe.data.SensorRepository
 import com.roomvibe.data.SyncState
 import com.roomvibe.data.entity.Sensor
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -24,6 +25,10 @@ data class SensorListUiState(
     val isScanning: Boolean = false,
     val syncStates: Map<String, SyncState> = emptyMap(),
     val liveTemps: Map<String, TempProbe> = emptyMap(),
+    /** A "sync all" run is in progress; [syncAllDone] of [syncAllTotal] finished. */
+    val isSyncingAll: Boolean = false,
+    val syncAllDone: Int = 0,
+    val syncAllTotal: Int = 0,
     val backupBusy: Boolean = false,
     val infoMessage: String? = null,
     val errorMessage: String? = null
@@ -44,8 +49,15 @@ class SensorListViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    // Serialise temperature probes so we never open two BLE connections at once
-    private val probeMutex = Mutex()
+    /**
+     * One BLE conversation at a time, across probes and syncs alike.
+     *
+     * These sensors accept a single connection — that's why the Xiaomi app has to
+     * be force-stopped before this one can reach them — and Android's stack is
+     * unreliable with concurrent GATT sessions. Anything that opens a connection
+     * takes this first, so a queued sensor waits rather than fighting for the radio.
+     */
+    private val bleMutex = Mutex()
 
     fun scanForDevices() {
         if (_uiState.value.isScanning) return
@@ -70,7 +82,7 @@ class SensorListViewModel(app: Application) : AndroidViewModel(app) {
         if (_uiState.value.liveTemps.containsKey(address)) return
         _uiState.update { it.copy(liveTemps = it.liveTemps + (address to TempProbe.Loading)) }
         viewModelScope.launch {
-            val temp = probeMutex.withLock { repo.readCurrentTemp(address) }
+            val temp = bleMutex.withLock { repo.readCurrentTemp(address) }
             val result = temp?.let { TempProbe.Value(it) } ?: TempProbe.Failed
             _uiState.update { it.copy(liveTemps = it.liveTemps + (address to result)) }
         }
@@ -92,15 +104,76 @@ class SensorListViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private val syncJobs = mutableMapOf<String, kotlinx.coroutines.Job>()
+    private var syncAllJob: Job? = null
+
+    private fun isBusy(address: String): Boolean =
+        _uiState.value.syncStates[address].let {
+            it is SyncState.Connecting || it is SyncState.Progress
+        }
 
     fun syncSensor(address: String) {
-        if (_uiState.value.syncStates[address] is SyncState.Connecting ||
-            _uiState.value.syncStates[address] is SyncState.Progress) return
+        if (isBusy(address)) return
+        syncJobs[address] = viewModelScope.launch { runSync(address) }
+    }
 
-        syncJobs[address] = viewModelScope.launch {
+    /**
+     * Sync one sensor, waiting for the radio if something else is using it.
+     *
+     * The wait is shown on the card rather than hidden, so a queued sensor reads
+     * as pending instead of looking like nothing happened.
+     */
+    private suspend fun runSync(address: String) {
+        _uiState.update { it.copy(syncStates = it.syncStates + (address to SyncState.Progress("Waiting…"))) }
+        bleMutex.withLock {
             repo.syncSensor(address).collect { state ->
                 _uiState.update { it.copy(syncStates = it.syncStates + (address to state)) }
             }
+        }
+    }
+
+    /**
+     * Sync every sensor, one after another.
+     *
+     * Sequential by necessity, not preference — see [bleMutex]. A sensor that
+     * fails doesn't stop the rest: the repository reports errors as a state rather
+     * than throwing, so the loop moves on to the next one.
+     */
+    fun syncAll() {
+        if (_uiState.value.isSyncingAll) return
+        val addresses = _uiState.value.sensors.map { it.address }
+        if (addresses.isEmpty()) return
+
+        syncAllJob = viewModelScope.launch {
+            // Mark the whole set pending up front. Besides reading correctly, it
+            // makes every card busy, so a tap on one sensor's "Sync now" can't
+            // queue a second sync of a sensor this run is already going to reach.
+            _uiState.update { s ->
+                s.copy(
+                    isSyncingAll = true, syncAllDone = 0, syncAllTotal = addresses.size,
+                    syncStates = s.syncStates + addresses.associateWith { SyncState.Progress("Waiting…") }
+                )
+            }
+            try {
+                addresses.forEach { address ->
+                    runSync(address)
+                    _uiState.update { it.copy(syncAllDone = it.syncAllDone + 1) }
+                }
+            } finally {
+                // Runs on cancellation too, so the button can't be left spinning.
+                _uiState.update { it.copy(isSyncingAll = false) }
+            }
+        }
+    }
+
+    fun cancelSyncAll() {
+        syncAllJob?.cancel()
+        syncAllJob = null
+        _uiState.update { s ->
+            s.copy(
+                isSyncingAll = false,
+                // Keep what finished; drop the sensors left mid-flight or queued.
+                syncStates = s.syncStates.filterValues { it is SyncState.Done || it is SyncState.Error }
+            )
         }
     }
 
