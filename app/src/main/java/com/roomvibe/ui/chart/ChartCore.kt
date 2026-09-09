@@ -53,6 +53,38 @@ internal const val PAD_B = 26f
  */
 internal val ChartSurface = Color(0xFF1B1D21)
 
+/**
+ * The bands of [top]..[bottom] that no entry of [blocked] covers.
+ *
+ * Used to park a chart's floating labels where nothing is drawn: the caller hands
+ * over the vertical span each line occupies in the column the labels sit in, and
+ * gets back the room that's left. Inputs may overlap and arrive in any order.
+ */
+internal fun freeGaps(
+    blocked: List<ClosedFloatingPointRange<Float>>,
+    top: Float,
+    bottom: Float
+): List<ClosedFloatingPointRange<Float>> {
+    val merged = mutableListOf<ClosedFloatingPointRange<Float>>()
+    for (b in blocked.sortedBy { it.start }) {
+        val prev = merged.lastOrNull()
+        if (prev != null && b.start <= prev.endInclusive) {
+            merged[merged.lastIndex] = prev.start..maxOf(prev.endInclusive, b.endInclusive)
+        } else {
+            merged += b
+        }
+    }
+    val gaps = mutableListOf<ClosedFloatingPointRange<Float>>()
+    var cursor = top
+    for (m in merged) {
+        if (m.start > cursor) gaps += cursor..minOf(m.start, bottom)
+        cursor = maxOf(cursor, m.endInclusive)
+        if (cursor >= bottom) break
+    }
+    if (cursor < bottom) gaps += cursor..bottom
+    return gaps
+}
+
 enum class Metric { TEMP, HUMIDITY }
 enum class Lod { HOURLY, DAILY, MONTHLY }
 
