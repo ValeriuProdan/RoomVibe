@@ -10,6 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -35,17 +36,29 @@ data class CompareSeries(
 )
 
 /** Below this many lines each one also gets its name drawn at its right-hand end. */
-private const val MAX_DIRECT_LABELS = 4
+private const val MAX_DIRECT_LABELS = 5
+
+/** How the min line is set apart from its device's max line: thinner and fainter. */
+private const val MIN_LINE_WEIGHT = 0.6f
+private const val MIN_LINE_ALPHA = 0.6f
 
 /**
  * Several devices' readings for one metric, on one shared axis.
  *
  * Two measures never share a chart here — the screen picks temperature *or*
  * humidity, so a difference in height always means a difference in the same unit.
- * Identity is carried by colour (see [seriesStyle]) and never by colour alone:
- * the legend chips below the chart repeat every colour, up to four lines are
- * labelled directly at their right-hand end, and the scrubber readout names each
- * device beside its value.
+ *
+ * What colour means here is the caller's choice, carried in each series' style
+ * (see [SeriesColoring]). Under BY_VALUE it is the metric's comfort ramp, exactly
+ * as on the single-sensor charts, so a room at 22 °C is the same green on both
+ * screens — and identity rides on the stroke instead: each device has its own dash
+ * pattern and weight. Under BY_DEVICE the style carries a fixed hue and the line
+ * is drawn in it.
+ *
+ * Either way identity is never carried by colour alone: the legend chips and the
+ * marker readout repeat each device's stroke, up to [MAX_DIRECT_LABELS] lines name
+ * themselves at their right-hand end, and the readout lists every device by name
+ * beside its value.
  */
 @Composable
 fun CompareChart(
@@ -54,6 +67,7 @@ fun CompareChart(
     series: List<CompareSeries>,
     viewport: Viewport,
     scrubberMs: Long?,
+    rangeStyle: RangeStyle,
     dataMin: Long,
     dataMax: Long,
     fahrenheit: Boolean,
@@ -131,39 +145,75 @@ fun CompareChart(
             drawText(lbl, topLeft = Offset(PAD_L + w + 8f, y - lbl.size.height / 2))
         }
 
-        // Zoomed out, one point per day would hide the whole story — a day that ran
-        // 5→18 °C and one that sat at 11 °C all day average out the same. So each
-        // day/month bucket draws its min–max envelope: one closed path, filled and
-        // then stroked, which stays readable even where several bands overlap.
-        if (lod != Lod.HOURLY) {
+        // Which values each device draws, and whether that is one line or two.
+        val (upperPart, lowerPart) = drawnParts(rangeStyle, lod)
+        val twoLines = upperPart != lowerPart
+
+        // How each device's line is painted: its own hue, or the value ramp — the
+        // same mapping the single-sensor charts use, painted along the line so
+        // every stretch shows the reading it was taken from.
+        //
+        // Built once per device per frame: a band is drawn twice with the line on
+        // top, and rebuilding the gradient for each was three times the work for
+        // no visible difference — the alpha varies, the colours don't.
+        fun paintFor(s: CompareSeries, part: Part) =
+            s.style.color?.let { SolidColor(it) }
+                ?: valueBrush(s.points, scale, part, alpha = 1f) { v -> metricColor(metric, v) }
+
+        val ramps = plotted.map { paintFor(it, upperPart) }
+
+        // "Midpoint + area" shades the whole day behind the line: one closed path,
+        // filled and then stroked, which stays readable even where bands overlap.
+        // The other styles draw the range as lines instead, so no band.
+        if (lod != Lod.HOURLY && rangeStyle == RangeStyle.MIDPOINT_AREA) {
             val fillAlpha = when (plotted.size) {
                 1, 2 -> 0.20f
                 3, 4 -> 0.15f
                 else -> 0.10f
             }
             val edge = Stroke(1.5f, cap = StrokeCap.Round, join = StrokeJoin.Round)
-            for (s in plotted) {
+            plotted.forEachIndexed { i, s ->
                 val band = paths.envelope(s.points, scale)
-                drawPath(band, s.style.color.copy(alpha = fillAlpha))
-                drawPath(band, s.style.color.copy(alpha = 0.55f), style = edge)
+                drawPath(band, ramps[i], alpha = fillAlpha)
+                drawPath(band, ramps[i], alpha = 0.55f, style = edge)
             }
         }
 
-        // The lines themselves, each in its device's colour
-        for (s in plotted) {
+        // The lines themselves: the metric's colour ramp along the stroke, the
+        // device's own dash pattern and weight across it.
+        plotted.forEachIndexed { i, s ->
             drawPath(
-                paths.line(s.points, scale, Part.MID),
-                s.style.color,
-                style = Stroke(3.5f, cap = StrokeCap.Round, join = StrokeJoin.Round,
+                paths.line(s.points, scale, upperPart),
+                ramps[i],
+                style = Stroke(s.style.width, cap = StrokeCap.Round, join = StrokeJoin.Round,
                     pathEffect = s.style.pathEffect)
             )
+        }
+
+        // The min line, when there is one. The single-sensor chart dashes its min
+        // line to tell it from the max — here the dash pattern is already spoken
+        // for, it says *which device*, so a second pattern on top of that would
+        // make both unreadable. So the min keeps its device's pattern and is drawn
+        // thinner and fainter instead, always below its own max.
+        if (twoLines) {
+            for (s in plotted) {
+                drawPath(
+                    paths.line(s.points, scale, lowerPart),
+                    paintFor(s, lowerPart),
+                    alpha = MIN_LINE_ALPHA,
+                    style = Stroke((s.style.width * MIN_LINE_WEIGHT).coerceAtLeast(1.6f),
+                        cap = StrokeCap.Round, join = StrokeJoin.Round,
+                        pathEffect = s.style.pathEffect)
+                )
+            }
         }
 
         // Direct labels: a few lines name themselves, so reading the chart doesn't
         // need a trip to the legend.
         if (plotted.size in 2..MAX_DIRECT_LABELS) {
-            drawEndLabels(textMeasurer, plotted, plotRight = PAD_L + w, plotTop = PAD_T,
-                plotBottom = PAD_T + h, xOf = { t -> xOf(t) }, yOf = { v -> yOf(v) })
+            drawEndLabels(textMeasurer, plotted, metric, upperPart, plotRight = PAD_L + w,
+                plotTop = PAD_T, plotBottom = PAD_T + h,
+                xOf = { t -> xOf(t) }, yOf = { v -> yOf(v) })
         }
 
         // X-axis time labels, on round clock boundaries
@@ -199,7 +249,12 @@ fun CompareChart(
             // clock — and pretending otherwise would misplace the value.
             for (s in plotted) {
                 val near = s.points.bucketAt(sel, lod) ?: continue
-                drawScrubDot(xOf(near.tMs), yOf(near.mid), s.style.color)
+                val up = near.value(upperPart)
+                drawScrubDot(xOf(near.tMs), yOf(up), s.style.color ?: metricColor(metric, up))
+                if (twoLines) {
+                    val down = near.value(lowerPart)
+                    drawScrubDot(xOf(near.tMs), yOf(down), s.style.color ?: metricColor(metric, down))
+                }
             }
             anchor?.let {
                 val stamp = textMeasurer.measure(
@@ -213,31 +268,48 @@ fun CompareChart(
     }
 }
 
+/** Width of the stroke sample drawn beside a direct label, plus its gap. */
+private const val END_SWATCH_W = 18f
+private const val END_SWATCH_GAP = 5f
+
 /**
  * Names each line at its right-hand end, nudging labels apart vertically when the
  * lines end close together so they never overlap.
+ *
+ * Each name is preceded by a short sample of its own stroke, and sits in the
+ * colour its line has there. Under value colouring that colour is the reading
+ * rather than the device, so the stroke sample is what ties the name to a line.
  */
 private fun DrawScope.drawEndLabels(
     textMeasurer: TextMeasurer,
     series: List<CompareSeries>,
+    metric: Metric,
+    part: Part,
     plotRight: Float,
     plotTop: Float,
     plotBottom: Float,
     xOf: (Long) -> Float,
     yOf: (Float) -> Float
 ) {
-    data class EndLabel(val layout: TextLayoutResult, val color: Color, val anchorY: Float, var y: Float)
+    data class EndLabel(
+        val layout: TextLayoutResult,
+        val style: SeriesStyle,
+        val color: Color,
+        val anchorY: Float,
+        var y: Float
+    )
 
     val labels = series.mapNotNull { s ->
         val last = s.points.last()
         // Skip lines that end off-screen to the right — the label would float free.
         if (xOf(last.tMs) > plotRight + 4f) return@mapNotNull null
+        val color = s.style.color ?: metricColor(metric, last.value(part))
         val layout = textMeasurer.measure(
             s.label.take(14),
-            TextStyle(fontSize = 10.sp, color = s.style.color, fontWeight = FontWeight.SemiBold)
+            TextStyle(fontSize = 10.sp, color = color, fontWeight = FontWeight.SemiBold)
         )
-        val y = yOf(last.mid) - layout.size.height - 6f
-        EndLabel(layout, s.style.color, y, y)
+        val y = yOf(last.value(part)) - layout.size.height - 6f
+        EndLabel(layout, s.style, color, y, y)
     }.sortedBy { it.anchorY }
 
     // Single downward pass is enough for a handful of labels: push each one below
@@ -250,8 +322,17 @@ private fun DrawScope.drawEndLabels(
     val overflow = minY - plotBottom
     if (overflow > 0f) labels.forEach { it.y = (it.y - overflow).coerceAtLeast(plotTop) }
 
+    val lead = END_SWATCH_W + END_SWATCH_GAP
     for (l in labels) {
-        val x = (plotRight - l.layout.size.width).coerceAtLeast(PAD_L)
+        val x = (plotRight - l.layout.size.width).coerceAtLeast(PAD_L + lead)
         drawText(l.layout, topLeft = Offset(x, l.y))
+        val cy = l.y + l.layout.size.height / 2f
+        drawLine(
+            l.color,
+            Offset(x - lead, cy), Offset(x - END_SWATCH_GAP, cy),
+            strokeWidth = l.style.width,
+            cap = StrokeCap.Round,
+            pathEffect = l.style.pathEffect
+        )
     }
 }

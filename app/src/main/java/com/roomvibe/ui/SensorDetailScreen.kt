@@ -35,6 +35,7 @@ import com.roomvibe.data.formatTemp
 import com.roomvibe.data.entity.Reading
 import com.roomvibe.ui.chart.Metric
 import com.roomvibe.ui.chart.MetricChart
+import com.roomvibe.ui.chart.RangeStyle
 import com.roomvibe.ui.chart.Viewport
 import com.roomvibe.ui.chart.zoomLabel
 import com.roomvibe.viewmodel.SensorDetailViewModel
@@ -67,7 +68,9 @@ fun SensorDetailScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
     val context = LocalContext.current
-    val fahrenheit by AppSettings.get(context).fahrenheit.collectAsStateWithLifecycle()
+    val settings = AppSettings.get(context)
+    val fahrenheit by settings.fahrenheit.collectAsStateWithLifecycle()
+    val rangeStyle by settings.rangeStyle.collectAsStateWithLifecycle()
     var showGattExplorer by remember { mutableStateOf(false) }
     // rememberSaveable so zoom/pan and the scrubber survive rotation
     var viewport by rememberSaveable(stateSaver = ViewportSaver) { mutableStateOf<Viewport?>(null) }
@@ -157,7 +160,7 @@ fun SensorDetailScreen(
                     title = "Temperature", unit = "°", metric = Metric.TEMP,
                     accent = TempAccent, readings = state.readings, viewport = vp ?: Viewport(0, 1),
                     scrubberMs = scrubberMs, showTimeLabel = true, showTitle = !isLandscape,
-                    colorByValue = true, fahrenheit = fahrenheit,
+                    colorByValue = true, rangeStyle = rangeStyle, fahrenheit = fahrenheit,
                     onViewportChange = { viewport = it }, onScrub = { scrubberMs = it },
                     modifier = Modifier.fillMaxSize()
                 )
@@ -169,7 +172,7 @@ fun SensorDetailScreen(
                     title = "Humidity", unit = "%", metric = Metric.HUMIDITY,
                     accent = HumidAccent, readings = state.readings, viewport = vp ?: Viewport(0, 1),
                     scrubberMs = scrubberMs, showTimeLabel = true, showTitle = !isLandscape,
-                    colorByValue = true,
+                    colorByValue = true, rangeStyle = rangeStyle,
                     onViewportChange = { viewport = it }, onScrub = { scrubberMs = it },
                     modifier = Modifier.fillMaxSize()
                 )

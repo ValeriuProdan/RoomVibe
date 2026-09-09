@@ -1,6 +1,5 @@
 package com.roomvibe.ui
 
-import androidx.compose.ui.graphics.Color
 import com.roomvibe.ui.chart.SeriesPoint
 import com.roomvibe.ui.chart.SeriesStyle
 import org.junit.Assert.assertEquals
@@ -13,7 +12,7 @@ import org.junit.Test
  */
 class ReadoutRowTest {
 
-    private val style = SeriesStyle(Color(0xFF3987E5), null)
+    private val style = SeriesStyle(color = null, dash = null)
 
     private fun row(label: String, value: Float?) = ReadoutRow(
         label = label,

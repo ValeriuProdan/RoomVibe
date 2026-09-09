@@ -9,8 +9,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
@@ -47,6 +49,20 @@ internal const val PAD_B = 26f
 enum class Metric { TEMP, HUMIDITY }
 enum class Lod { HOURLY, DAILY, MONTHLY }
 
+/**
+ * What a chart draws for a bucket that covers a range of readings rather than one.
+ *
+ * Zoomed out to whole days or months there is no single "the temperature" — a day
+ * that ran 5→18 °C and one that sat at 11 °C all day have the same average — so
+ * the chart has to choose what to show, and which choice is right depends on the
+ * question. [MAX_ONLY] answers "how hot did it get"; [MIN_MAX] shows both ends;
+ * [MIDPOINT_AREA] draws the middle of the range with the whole range shaded behind
+ * it, which stays readable when several devices overlap.
+ *
+ * Hourly detail ignores this: one reading has no range to show.
+ */
+enum class RangeStyle { MAX_ONLY, MIN_MAX, MIDPOINT_AREA }
+
 fun lodFor(span: Long): Lod = when {
     span <= 6 * DAY -> Lod.HOURLY
     span <= 550 * DAY -> Lod.DAILY
@@ -67,7 +83,7 @@ data class Viewport(val startMs: Long, val endMs: Long) {
 internal fun dispValue(v: Float, metric: Metric, fahrenheit: Boolean): Float =
     if (metric == Metric.TEMP && fahrenheit) v * 9f / 5f + 32f else v
 
-// ── Value → colour ramps (single-sensor charts) ─────────────────────────────
+// ── Value → colour ramps (shared by every chart) ────────────────────────────
 
 // Temperature → colour ramp anchored to human thermal comfort (ASHRAE ~20–25 °C
 // comfort zone): green through the comfortable band, blue when cold, red when hot.
@@ -110,6 +126,14 @@ private fun interpStops(value: Float, stops: List<Pair<Float, Color>>): Color {
 
 fun tempColor(celsius: Float): Color = interpStops(celsius, TEMP_STOPS)
 fun humidColor(percent: Float): Color = interpStops(percent, HUMID_STOPS)
+
+/**
+ * The ramp for a metric. Every chart in the app comes through here, so a reading
+ * is the same colour wherever it is drawn — on its own sensor's chart or beside
+ * three other rooms on the compare chart.
+ */
+fun metricColor(metric: Metric, value: Float): Color =
+    if (metric == Metric.TEMP) tempColor(value) else humidColor(value)
 
 // ── Aggregation ─────────────────────────────────────────────────────────────
 
@@ -444,10 +468,67 @@ internal class ChartScale(
 /** Which of a bucket's three values a path follows. */
 internal enum class Part { MID, HI, LO }
 
-private fun SeriesPoint.value(part: Part): Float = when (part) {
+internal fun SeriesPoint.value(part: Part): Float = when (part) {
     Part.MID -> mid
     Part.HI -> hi
     Part.LO -> lo
+}
+
+/**
+ * The two bucket values a chart draws at [lod] under [style]: the upper line and
+ * the lower one.
+ *
+ * They are the same [Part] when the style draws a single line, so a caller can
+ * compare the pair to decide whether there is a second line at all — and so
+ * markers, scrubber dots and end labels land on a line that is actually drawn
+ * rather than floating where one used to be.
+ */
+internal fun drawnParts(style: RangeStyle, lod: Lod): Pair<Part, Part> =
+    if (lod == Lod.HOURLY) Part.MID to Part.MID
+    else when (style) {
+        RangeStyle.MAX_ONLY -> Part.HI to Part.HI
+        RangeStyle.MIN_MAX -> Part.HI to Part.LO
+        RangeStyle.MIDPOINT_AREA -> Part.MID to Part.MID
+    }
+
+/** Colour stops in a value-coloured line gradient. Past this, more is invisible. */
+private const val MAX_GRADIENT_STOPS = 64
+
+/**
+ * A horizontal gradient that paints a line by each point's own value, so the
+ * stroke carries the comfort ramp instead of one flat colour.
+ *
+ * The shader is rebuilt every frame, so the stops are thinned to a fixed budget —
+ * well past the point where more of them would be visible. [colorAt] is what
+ * decides the mapping, so a chart can hand it the metric's ramp or a flat accent.
+ */
+internal fun valueBrush(
+    points: List<SeriesPoint>,
+    scale: ChartScale,
+    part: Part,
+    alpha: Float,
+    colorAt: (Float) -> Color
+): Brush {
+    if (points.isEmpty()) return SolidColor(Color.Transparent)
+    val firstX = scale.x(points.first().tMs)
+    val lastX = scale.x(points.last().tMs)
+    val span = lastX - firstX
+    if (span <= 0f) return SolidColor(colorAt(points.first().value(part)).copy(alpha = alpha))
+    val stride = maxOf(1, points.size / MAX_GRADIENT_STOPS)
+    var prev = -1f
+    val stops = points.indices
+        .filter { it % stride == 0 || it == points.lastIndex }
+        .map { i ->
+            var f = ((scale.x(points[i].tMs) - firstX) / span).coerceIn(0f, 1f)
+            // Stops must strictly increase; two points can land on the same pixel.
+            if (f <= prev) f = (prev + 1e-4f).coerceAtMost(1f)
+            prev = f
+            f to colorAt(points[i].value(part)).copy(alpha = alpha)
+        }
+    return Brush.linearGradient(
+        colorStops = stops.toTypedArray(),
+        start = Offset(firstX, 0f), end = Offset(lastX, 0f)
+    )
 }
 
 /**

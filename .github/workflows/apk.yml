@@ -1,0 +1,117 @@
+name: APK
+
+# Builds an installable APK and attaches it to the run, so a build can be
+# downloaded from GitHub without a machine set up for Android.
+#
+# Push a tag (v1.4, say) and the same APK is published as a GitHub Release
+# instead — the one place a download survives the 90-day artifact expiry.
+on:
+  push:
+    branches: [ main, 'release/**', 'claude/**' ]
+    tags: [ 'v*' ]
+  workflow_dispatch:
+
+concurrency:
+  group: apk-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write   # needed only by the tag → Release step
+
+jobs:
+  apk:
+    name: Build APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      # Fail here rather than shipping an APK that never ran the tests.
+      - name: Run unit tests
+        run: ./gradlew testDebugUnitTest --stacktrace
+
+      # An APK signed with the release key installs *over* an existing RoomVibe;
+      # a debug-signed one has a different signature, so Android refuses the
+      # update and it has to be uninstalled first. So sign properly whenever the
+      # repository has the secrets for it, and fall back to debug when it doesn't.
+      #
+      # To enable: add KEYSTORE_BASE64 (`base64 -w0 your.keystore`),
+      # KEYSTORE_PASSWORD, KEY_ALIAS and KEY_PASSWORD under
+      # Settings → Secrets and variables → Actions.
+      - name: Restore signing keystore
+        id: signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_BASE64:-}" ]; then
+            # A tag means a public Release. A debug-signed APK there installs
+            # for nobody who already has the app — Android rejects the
+            # signature change — so refuse the tag rather than publish one.
+            if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+              echo "::error::No signing secrets, so this tag would publish a" \
+                   "debug-signed APK that cannot update an installed RoomVibe." \
+                   "Add KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS and" \
+                   "KEY_PASSWORD under Settings → Secrets and variables →" \
+                   "Actions, then re-run this job."
+              exit 1
+            fi
+            echo "No signing secrets set — building a debug-signed APK."
+            echo "variant=debug" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          printf '%s' "${KEYSTORE_BASE64}" | base64 -d > release.keystore
+          # Gitignored, and the runner is discarded after the job.
+          {
+            echo "storeFile=release.keystore"
+            echo "storePassword=${KEYSTORE_PASSWORD}"
+            echo "keyAlias=${KEY_ALIAS}"
+            echo "keyPassword=${KEY_PASSWORD}"
+          } > keystore.properties
+          echo "variant=release" >> "$GITHUB_OUTPUT"
+
+      - name: Build APK
+        run: ./gradlew assemble${{ steps.signing.outputs.variant == 'release' && 'Release' || 'Debug' }} --stacktrace
+
+      # A release build keeps the name the published releases have always used;
+      # a branch build says which commit and variant it came from instead.
+      - name: Name the APK
+        id: apk
+        run: |
+          set -euo pipefail
+          variant=${{ steps.signing.outputs.variant }}
+          src=$(find "app/build/outputs/apk/$variant" -name '*.apk' -print -quit)
+          version=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts)
+          if [ "$variant" = "release" ]; then
+            name="RoomVibe-${version}.apk"
+          else
+            name="roomvibe-${version}-debug-${GITHUB_SHA::7}.apk"
+          fi
+          mkdir -p dist && cp "$src" "dist/$name"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.apk.outputs.name }}
+          path: dist/*.apk
+          if-no-files-found: error
+
+      - name: Publish tagged release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/*.apk \
+            --title "RoomVibe ${GITHUB_REF_NAME#v}" --generate-notes

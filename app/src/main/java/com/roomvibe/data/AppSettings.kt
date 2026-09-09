@@ -4,8 +4,13 @@ import android.content.Context
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import com.roomvibe.ui.chart.RangeStyle
+import com.roomvibe.ui.chart.SeriesColoring
 
-/** Small persisted app-wide preferences (temperature unit, compare-chart state). */
+/**
+ * Small persisted app-wide preferences (temperature unit, how zoomed-out charts
+ * draw a bucket, compare-chart state).
+ */
 class AppSettings private constructor(context: Context) {
     private val prefs = context.getSharedPreferences("roomvibe_settings", Context.MODE_PRIVATE)
 
@@ -17,7 +22,45 @@ class AppSettings private constructor(context: Context) {
         _fahrenheit.value = value
     }
 
+    // ── Charts ───────────────────────────────────────────────────────────────
+
+    /**
+     * What every chart draws for a day or month bucket. One app-wide choice: the
+     * single-sensor and compare charts answering the same question differently is
+     * what made them hard to read side by side.
+     */
+    private val _rangeStyle = MutableStateFlow(readRangeStyle())
+    val rangeStyle: StateFlow<RangeStyle> = _rangeStyle.asStateFlow()
+
+    fun setRangeStyle(value: RangeStyle) {
+        prefs.edit().putString(KEY_RANGE_STYLE, value.name).apply()
+        _rangeStyle.value = value
+    }
+
+    /** Falls back to the default for a missing value, and for one a downgrade wrote. */
+    private fun readRangeStyle(): RangeStyle {
+        val stored = prefs.getString(KEY_RANGE_STYLE, null) ?: return RangeStyle.MIN_MAX
+        return RangeStyle.values().firstOrNull { it.name == stored } ?: RangeStyle.MIN_MAX
+    }
+
     // ── Compare chart ────────────────────────────────────────────────────────
+
+    /**
+     * What a compare line's colour means. Compare-only: the single-sensor charts
+     * have one line, so there is no identity for a hue to carry there.
+     */
+    private val _seriesColoring = MutableStateFlow(readSeriesColoring())
+    val seriesColoring: StateFlow<SeriesColoring> = _seriesColoring.asStateFlow()
+
+    fun setSeriesColoring(value: SeriesColoring) {
+        prefs.edit().putString(KEY_SERIES_COLORING, value.name).apply()
+        _seriesColoring.value = value
+    }
+
+    private fun readSeriesColoring(): SeriesColoring {
+        val stored = prefs.getString(KEY_SERIES_COLORING, null) ?: return SeriesColoring.BY_VALUE
+        return SeriesColoring.values().firstOrNull { it.name == stored } ?: SeriesColoring.BY_VALUE
+    }
 
     /** Devices currently plotted on the compare chart, or null if never chosen. */
     private val _compareSelection = MutableStateFlow(
@@ -46,7 +89,9 @@ class AppSettings private constructor(context: Context) {
 
     companion object {
         private const val KEY_FAHRENHEIT = "fahrenheit"
+        private const val KEY_RANGE_STYLE = "range_style"
         private const val KEY_COMPARE_SELECTION = "compare_selection"
+        private const val KEY_SERIES_COLORING = "series_coloring"
         private const val KEY_SERIES_SLOTS = "series_slots"
 
         @Volatile private var instance: AppSettings? = null

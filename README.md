@@ -44,16 +44,27 @@ even when you're away from home.
   keeps it in a local database, so you can read it offline and from anywhere.
 - **Zoomable timeline charts** — pinch to zoom smoothly from hourly detail out to
   days and months; drag to scroll through time; tap/drag to inspect exact values.
+- **Choose what a zoomed-out day shows** — a day covers a range of readings, not
+  one, so the ⋮ menu picks how every chart draws it: **Max only**, **Min & max**
+  (the default — two lines), or **Midpoint + range** (one line with the whole
+  range shaded behind it). One setting, applied to the single-sensor and compare
+  charts alike.
 - **Comfort-coloured lines** — temperature is coloured by human thermal comfort
   (green ≈ 20–25 °C, blue when cold, red when hot); humidity is green at the ideal
-  (~48%) and red at the dry/humid extremes.
+  (~48%) and red at the dry/humid extremes. The compare screen uses the same ramp,
+  so a reading looks the same wherever it is drawn.
 - **Compare devices** — swipe left from the sensor list (or tap the chart icon) for
   a second screen that plots several sensors on one shared axis, so you can see
   balcony-versus-living-room directly instead of eyeballing two charts. Tick devices
   on and off, and drag the marker to read every device's value at that moment
-  together with the spread between them. Zoomed out to whole days each device
-  shows its min–max envelope, not just the daily average. Every device keeps its
-  own colour, drawn from a fixed colour-blind-safe palette.
+  together with the spread between them. The button in the top bar switches what
+  colour means: **by reading** (the comfort ramp, matching the single-sensor
+  charts — each device then told apart by its own dash pattern and weight), or
+  **by device** (one fixed hue each, from a colour-blind-safe palette). Either
+  way a device keeps its look for good, repeated on its legend chip and in the
+  marker readout. Where the single-sensor chart dashes its min line, this one
+  can't under reading colours — the dash is already saying *which sensor* — so a
+  device's min line is drawn thinner and fainter than its max.
 - **°C / °F** toggle.
 - **Google Drive backup & restore** — export/import all data as a JSON file via the
   system picker (no account setup required).
