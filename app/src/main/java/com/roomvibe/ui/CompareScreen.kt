@@ -38,6 +38,7 @@ import com.roomvibe.ui.chart.CompareChart
 import com.roomvibe.ui.chart.CompareSeries
 import com.roomvibe.ui.chart.Lod
 import com.roomvibe.ui.chart.Metric
+import com.roomvibe.ui.chart.RangeStyle
 import com.roomvibe.ui.chart.SeriesData
 import com.roomvibe.ui.chart.SeriesPoint
 import com.roomvibe.ui.chart.SeriesStyle
@@ -115,7 +116,9 @@ fun CompareScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
-    val fahrenheit by AppSettings.get(context).fahrenheit.collectAsStateWithLifecycle()
+    val settings = AppSettings.get(context)
+    val fahrenheit by settings.fahrenheit.collectAsStateWithLifecycle()
+    val rangeStyle by settings.rangeStyle.collectAsStateWithLifecycle()
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
 
     var viewport by rememberSaveable(stateSaver = ViewportSaver) { mutableStateOf<Viewport?>(null) }
@@ -198,6 +201,7 @@ fun CompareScreen(
                     series = series,
                     viewport = vp,
                     scrubberMs = scrubberMs,
+                    rangeStyle = rangeStyle,
                     dataMin = oldest ?: vp.startMs,
                     dataMax = newest ?: vp.endMs,
                     fahrenheit = fahrenheit,

@@ -11,6 +11,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -42,6 +43,7 @@ fun MetricChart(
     showTimeLabel: Boolean,
     showTitle: Boolean = true,
     colorByValue: Boolean = false,
+    rangeStyle: RangeStyle = RangeStyle.MIN_MAX,
     fahrenheit: Boolean = false,
     onViewportChange: (Viewport) -> Unit,
     onScrub: (Long?) -> Unit,
@@ -128,56 +130,65 @@ fun MetricChart(
         // Colour a value using the metric's ramp when colorByValue, else the accent
         fun colorAt(v: Float): Color = if (colorByValue) metricColor(metric, v) else accent
 
-        // The primary line follows the midpoint at hourly detail, the daily maximum
-        // when zoomed out (the minimum gets its own dashed line below).
-        val primaryPart = if (lod == Lod.HOURLY) Part.MID else Part.HI
+        // Which values are actually drawn. Everything below — the fill, the pills,
+        // the scrubber dots — follows this, so nothing is ever marked on a line
+        // the chosen style didn't draw.
+        val (upperPart, lowerPart) = drawnParts(rangeStyle, lod)
+        val twoLines = upperPart != lowerPart
+        val showBand = lod != Lod.HOURLY && rangeStyle == RangeStyle.MIDPOINT_AREA
+
         // Horizontal gradient that colours the line by each point's own value —
         // the same brush the compare chart paints its lines with.
         fun lineBrush(part: Part, alpha: Float): Brush =
             valueBrush(points, scale, part, alpha) { v -> colorAt(v) }
 
-        // Fill under the primary line (skipped for the value-coloured temperature line)
-        if (!colorByValue) {
+        // Fill under the primary line. Skipped for the value-coloured line, and
+        // when the band below is already showing the day's range.
+        if (!colorByValue && !showBand) {
             drawPath(
-                paths.areaUnder(points, scale, primaryPart, baselineY = PAD_T + h),
+                paths.areaUnder(points, scale, upperPart, baselineY = PAD_T + h),
                 Brush.verticalGradient(
                     listOf(accent.copy(alpha = 0.35f), accent.copy(alpha = 0.02f)),
                     startY = PAD_T, endY = PAD_T + h)
             )
         }
 
+        // The min–max band, drawn first so the midpoint line sits on top of it.
+        if (showBand) {
+            val band = paths.envelope(points, scale)
+            val bandPaint = if (colorByValue) lineBrush(Part.MID, alpha = 1f) else SolidColor(accent)
+            drawPath(band, bandPaint, alpha = 0.20f)
+            drawPath(band, bandPaint, alpha = 0.55f,
+                style = Stroke(1.5f, cap = StrokeCap.Round, join = StrokeJoin.Round))
+        }
+
         // Primary line. Each path is drawn straight after it is built — the builder
         // hands back one reused Path, so never hold two at once.
         val lineStroke = Stroke(4.0f, cap = StrokeCap.Round, join = StrokeJoin.Round)
         if (colorByValue) {
-            drawPath(paths.line(points, scale, primaryPart), lineBrush(primaryPart, alpha = 1f), style = lineStroke)
+            drawPath(paths.line(points, scale, upperPart), lineBrush(upperPart, alpha = 1f), style = lineStroke)
         } else {
-            drawPath(paths.line(points, scale, primaryPart), accent, style = lineStroke)
+            drawPath(paths.line(points, scale, upperPart), accent, style = lineStroke)
         }
 
-        // Min line (dashed) for daily/monthly
-        if (lod != Lod.HOURLY) {
+        // The min line, dashed to tell it from the max. Only "Min & max" draws one.
+        if (twoLines) {
             val minStroke = Stroke(3.0f, cap = StrokeCap.Round, join = StrokeJoin.Round, pathEffect = dash)
             if (colorByValue) {
-                drawPath(paths.line(points, scale, Part.LO), lineBrush(Part.LO, alpha = 0.9f), style = minStroke)
+                drawPath(paths.line(points, scale, lowerPart), lineBrush(lowerPart, alpha = 0.9f), style = minStroke)
             } else {
-                drawPath(paths.line(points, scale, Part.LO), accent.copy(alpha = 0.6f), style = minStroke)
+                drawPath(paths.line(points, scale, lowerPart), accent.copy(alpha = 0.6f), style = minStroke)
             }
         }
 
-        // Min & max pills — placed on the actual plotted line (midpoint in hourly,
-        // the hi/lo envelope in daily/monthly)
-        if (lod == Lod.HOURLY) {
-            val maxP = points.maxByOrNull { it.mid }!!
-            val minP = points.minByOrNull { it.mid }!!
-            drawMarker(textMeasurer, xOf(maxP.tMs), yOf(maxP.mid), "%.1f".format(disp(maxP.mid)), colorAt(maxP.mid), above = true)
-            drawMarker(textMeasurer, xOf(minP.tMs), yOf(minP.mid), "%.1f".format(disp(minP.mid)), colorAt(minP.mid), above = false)
-        } else {
-            val maxP = points.maxByOrNull { it.hi }!!
-            val minP = points.minByOrNull { it.lo }!!
-            drawMarker(textMeasurer, xOf(maxP.tMs), yOf(maxP.hi), "%.1f".format(disp(maxP.hi)), colorAt(maxP.hi), above = true)
-            drawMarker(textMeasurer, xOf(minP.tMs), yOf(minP.lo), "%.1f".format(disp(minP.lo)), colorAt(minP.lo), above = false)
-        }
+        // Min & max pills, marking the extremes of what was drawn — so with only a
+        // max line both pills sit on it, rather than one hanging under nothing.
+        val maxP = points.maxByOrNull { it.value(upperPart) }!!
+        val minP = points.minByOrNull { it.value(lowerPart) }!!
+        val maxV = maxP.value(upperPart)
+        val minV = minP.value(lowerPart)
+        drawMarker(textMeasurer, xOf(maxP.tMs), yOf(maxV), "%.1f".format(disp(maxV)), colorAt(maxV), above = true)
+        drawMarker(textMeasurer, xOf(minP.tMs), yOf(minV), "%.1f".format(disp(minV)), colorAt(minV), above = false)
 
         // X-axis time labels, on round clock boundaries
         val target = (w / 90f).roundToInt().coerceIn(2, 6)
@@ -195,12 +206,8 @@ fun MetricChart(
                 val x = xOf(near.tMs)
                 drawLine(Color(0x88FFFFFF), Offset(x, PAD_T), Offset(x, PAD_T + h), 1.5f)
 
-                if (lod == Lod.HOURLY) {
-                    drawScrubDot(x, yOf(near.mid), colorAt(near.mid))
-                } else {
-                    drawScrubDot(x, yOf(near.hi), colorAt(near.hi))
-                    drawScrubDot(x, yOf(near.lo), colorAt(near.lo))
-                }
+                drawScrubDot(x, yOf(near.value(upperPart)), colorAt(near.value(upperPart)))
+                if (twoLines) drawScrubDot(x, yOf(near.value(lowerPart)), colorAt(near.value(lowerPart)))
 
                 val valStr = if (lod == Lod.HOURLY) "%.1f%s".format(disp(near.mid), unit)
                              else "%.1f–%.1f%s".format(disp(near.lo), disp(near.hi), unit)

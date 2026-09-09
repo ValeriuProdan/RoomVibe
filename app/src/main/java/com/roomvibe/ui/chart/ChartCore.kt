@@ -49,6 +49,20 @@ internal const val PAD_B = 26f
 enum class Metric { TEMP, HUMIDITY }
 enum class Lod { HOURLY, DAILY, MONTHLY }
 
+/**
+ * What a chart draws for a bucket that covers a range of readings rather than one.
+ *
+ * Zoomed out to whole days or months there is no single "the temperature" — a day
+ * that ran 5→18 °C and one that sat at 11 °C all day have the same average — so
+ * the chart has to choose what to show, and which choice is right depends on the
+ * question. [MAX_ONLY] answers "how hot did it get"; [MIN_MAX] shows both ends;
+ * [MIDPOINT_AREA] draws the middle of the range with the whole range shaded behind
+ * it, which stays readable when several devices overlap.
+ *
+ * Hourly detail ignores this: one reading has no range to show.
+ */
+enum class RangeStyle { MAX_ONLY, MIN_MAX, MIDPOINT_AREA }
+
 fun lodFor(span: Long): Lod = when {
     span <= 6 * DAY -> Lod.HOURLY
     span <= 550 * DAY -> Lod.DAILY
@@ -459,6 +473,23 @@ internal fun SeriesPoint.value(part: Part): Float = when (part) {
     Part.HI -> hi
     Part.LO -> lo
 }
+
+/**
+ * The two bucket values a chart draws at [lod] under [style]: the upper line and
+ * the lower one.
+ *
+ * They are the same [Part] when the style draws a single line, so a caller can
+ * compare the pair to decide whether there is a second line at all — and so
+ * markers, scrubber dots and end labels land on a line that is actually drawn
+ * rather than floating where one used to be.
+ */
+internal fun drawnParts(style: RangeStyle, lod: Lod): Pair<Part, Part> =
+    if (lod == Lod.HOURLY) Part.MID to Part.MID
+    else when (style) {
+        RangeStyle.MAX_ONLY -> Part.HI to Part.HI
+        RangeStyle.MIN_MAX -> Part.HI to Part.LO
+        RangeStyle.MIDPOINT_AREA -> Part.MID to Part.MID
+    }
 
 /** Colour stops in a value-coloured line gradient. Past this, more is invisible. */
 private const val MAX_GRADIENT_STOPS = 64
