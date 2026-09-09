@@ -10,6 +10,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
@@ -47,11 +48,15 @@ private const val MIN_LINE_ALPHA = 0.6f
  * Two measures never share a chart here — the screen picks temperature *or*
  * humidity, so a difference in height always means a difference in the same unit.
  *
- * Colour is the metric's comfort ramp, exactly as on the single-sensor charts, so
- * a room at 22 °C is the same green on both screens and "which of these rooms is
- * cold" is answerable at a glance. Identity therefore rides on the stroke instead
- * (see [seriesStyle]): each device has its own dash pattern and weight, which the
- * legend chips and the marker readout repeat, up to [MAX_DIRECT_LABELS] lines name
+ * What colour means here is the caller's choice, carried in each series' style
+ * (see [SeriesColoring]). Under BY_VALUE it is the metric's comfort ramp, exactly
+ * as on the single-sensor charts, so a room at 22 °C is the same green on both
+ * screens — and identity rides on the stroke instead: each device has its own dash
+ * pattern and weight. Under BY_DEVICE the style carries a fixed hue and the line
+ * is drawn in it.
+ *
+ * Either way identity is never carried by colour alone: the legend chips and the
+ * marker readout repeat each device's stroke, up to [MAX_DIRECT_LABELS] lines name
  * themselves at their right-hand end, and the readout lists every device by name
  * beside its value.
  */
@@ -144,15 +149,18 @@ fun CompareChart(
         val (upperPart, lowerPart) = drawnParts(rangeStyle, lod)
         val twoLines = upperPart != lowerPart
 
-        // The same value → colour mapping the single-sensor charts use, painted
-        // along each line so every stretch shows the reading it was taken from.
+        // How each device's line is painted: its own hue, or the value ramp — the
+        // same mapping the single-sensor charts use, painted along the line so
+        // every stretch shows the reading it was taken from.
         //
-        // One shader per device per frame: a band is drawn twice and the line on
-        // top of it, and rebuilding the gradient for each was three times the work
-        // for no visible difference — the alpha varies, the colours don't.
-        val ramps = plotted.map { s ->
-            valueBrush(s.points, scale, upperPart, alpha = 1f) { v -> metricColor(metric, v) }
-        }
+        // Built once per device per frame: a band is drawn twice with the line on
+        // top, and rebuilding the gradient for each was three times the work for
+        // no visible difference — the alpha varies, the colours don't.
+        fun paintFor(s: CompareSeries, part: Part) =
+            s.style.color?.let { SolidColor(it) }
+                ?: valueBrush(s.points, scale, part, alpha = 1f) { v -> metricColor(metric, v) }
+
+        val ramps = plotted.map { paintFor(it, upperPart) }
 
         // "Midpoint + area" shades the whole day behind the line: one closed path,
         // filled and then stroked, which stays readable even where bands overlap.
@@ -188,13 +196,10 @@ fun CompareChart(
         // make both unreadable. So the min keeps its device's pattern and is drawn
         // thinner and fainter instead, always below its own max.
         if (twoLines) {
-            plotted.forEachIndexed { i, s ->
-                val minBrush = valueBrush(s.points, scale, lowerPart, alpha = 1f) { v ->
-                    metricColor(metric, v)
-                }
+            for (s in plotted) {
                 drawPath(
                     paths.line(s.points, scale, lowerPart),
-                    minBrush,
+                    paintFor(s, lowerPart),
                     alpha = MIN_LINE_ALPHA,
                     style = Stroke((s.style.width * MIN_LINE_WEIGHT).coerceAtLeast(1.6f),
                         cap = StrokeCap.Round, join = StrokeJoin.Round,
@@ -245,10 +250,10 @@ fun CompareChart(
             for (s in plotted) {
                 val near = s.points.bucketAt(sel, lod) ?: continue
                 val up = near.value(upperPart)
-                drawScrubDot(xOf(near.tMs), yOf(up), metricColor(metric, up))
+                drawScrubDot(xOf(near.tMs), yOf(up), s.style.color ?: metricColor(metric, up))
                 if (twoLines) {
                     val down = near.value(lowerPart)
-                    drawScrubDot(xOf(near.tMs), yOf(down), metricColor(metric, down))
+                    drawScrubDot(xOf(near.tMs), yOf(down), s.style.color ?: metricColor(metric, down))
                 }
             }
             anchor?.let {
@@ -271,9 +276,9 @@ private const val END_SWATCH_GAP = 5f
  * Names each line at its right-hand end, nudging labels apart vertically when the
  * lines end close together so they never overlap.
  *
- * Each name is preceded by a short sample of its own stroke. The label sits in the
- * colour the line ends on — which is the *value* there, not the device — so the
- * sample is what actually ties the name back to a line.
+ * Each name is preceded by a short sample of its own stroke, and sits in the
+ * colour its line has there. Under value colouring that colour is the reading
+ * rather than the device, so the stroke sample is what ties the name to a line.
  */
 private fun DrawScope.drawEndLabels(
     textMeasurer: TextMeasurer,
@@ -298,7 +303,7 @@ private fun DrawScope.drawEndLabels(
         val last = s.points.last()
         // Skip lines that end off-screen to the right — the label would float free.
         if (xOf(last.tMs) > plotRight + 4f) return@mapNotNull null
-        val color = metricColor(metric, last.value(part))
+        val color = s.style.color ?: metricColor(metric, last.value(part))
         val layout = textMeasurer.measure(
             s.label.take(14),
             TextStyle(fontSize = 10.sp, color = color, fontWeight = FontWeight.SemiBold)

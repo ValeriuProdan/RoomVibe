@@ -12,7 +12,7 @@ import org.junit.Test
  */
 class ReadoutRowTest {
 
-    private val style = SeriesStyle(dash = null)
+    private val style = SeriesStyle(color = null, dash = null)
 
     private fun row(label: String, value: Float?) = ReadoutRow(
         label = label,

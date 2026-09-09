@@ -13,6 +13,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Thermostat
 import androidx.compose.material.icons.filled.Timeline
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.*
@@ -39,6 +41,7 @@ import com.roomvibe.ui.chart.CompareSeries
 import com.roomvibe.ui.chart.Lod
 import com.roomvibe.ui.chart.Metric
 import com.roomvibe.ui.chart.RangeStyle
+import com.roomvibe.ui.chart.SeriesColoring
 import com.roomvibe.ui.chart.SeriesData
 import com.roomvibe.ui.chart.SeriesPoint
 import com.roomvibe.ui.chart.SeriesStyle
@@ -119,6 +122,15 @@ fun CompareScreen(
     val settings = AppSettings.get(context)
     val fahrenheit by settings.fahrenheit.collectAsStateWithLifecycle()
     val rangeStyle by settings.rangeStyle.collectAsStateWithLifecycle()
+    val coloring by settings.seriesColoring.collectAsStateWithLifecycle()
+    val onToggleColoring = remember(settings) {
+        {
+            settings.setSeriesColoring(
+                if (settings.seriesColoring.value == SeriesColoring.BY_VALUE) SeriesColoring.BY_DEVICE
+                else SeriesColoring.BY_VALUE
+            )
+        }
+    }
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
 
     var viewport by rememberSaveable(stateSaver = ViewportSaver) { mutableStateOf<Viewport?>(null) }
@@ -152,14 +164,14 @@ fun CompareScreen(
     // Bucketing every selected device is the expensive step, so it is kept out of
     // the viewport's way entirely: SeriesData caches each zoom level on first use,
     // and this only rebuilds when the devices or the metric change.
-    val prepared = remember(selectedAddresses, state.readingsBySensor, state.sensors, state.slots, metric) {
+    val prepared = remember(selectedAddresses, state.readingsBySensor, state.sensors, state.slots, metric, coloring) {
         selectedAddresses.mapNotNull { address ->
             val readings = state.readingsBySensor[address]?.takeIf { it.isNotEmpty() }
                 ?: return@mapNotNull null
             Prepared(
                 address = address,
                 label = state.displayName(address),
-                style = seriesStyle(state.slots[address] ?: 0),
+                style = seriesStyle(state.slots[address] ?: 0, coloring),
                 data = SeriesData(readings, metric)
             )
         }
@@ -225,6 +237,7 @@ fun CompareScreen(
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back to sensors")
                         }
                     },
+                    actions = { ColoringToggle(coloring, onToggleColoring, Color.White) },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = ScreenBg,
                         titleContentColor = Color.White,
@@ -256,6 +269,8 @@ fun CompareScreen(
                 onToggleDevice = onToggle,
                 onAll = onAll,
                 onNone = onNone,
+                coloring = coloring,
+                onToggleColoring = onToggleColoring,
                 onBack = onBack
             )
             return@Scaffold
@@ -303,7 +318,8 @@ fun CompareScreen(
 
             Spacer(Modifier.height(8.dp))
 
-            DevicePicker(state = state, onToggle = onToggle, onAll = onAll, onNone = onNone)
+            DevicePicker(state = state, coloring = coloring, onToggle = onToggle,
+                onAll = onAll, onNone = onNone)
 
             Text(
                 "Tap to place the marker · Drag to scroll time · Two fingers: zoom",
@@ -341,6 +357,8 @@ private fun CompareLandscape(
     onToggleDevice: (String) -> Unit,
     onAll: () -> Unit,
     onNone: () -> Unit,
+    coloring: SeriesColoring,
+    onToggleColoring: () -> Unit,
     onBack: () -> Unit
 ) {
     var showDevices by rememberSaveable { mutableStateOf(false) }
@@ -381,6 +399,7 @@ private fun CompareLandscape(
                     }
                     if (i == 0) Spacer(Modifier.width(4.dp))
                 }
+                ColoringToggle(coloring, onToggleColoring, Color.White)
                 IconButton(onClick = { showDevices = !showDevices }) {
                     Icon(
                         Icons.Default.Tune,
@@ -446,6 +465,7 @@ private fun CompareLandscape(
                 Box(Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
                     DevicePicker(
                         state = state,
+                        coloring = coloring,
                         onToggle = onToggleDevice,
                         onAll = onAll,
                         onNone = onNone,
@@ -690,6 +710,7 @@ private fun ScrubReadout(
 @Composable
 private fun DevicePicker(
     state: CompareUiState,
+    coloring: SeriesColoring,
     onToggle: (String) -> Unit,
     onAll: () -> Unit,
     onNone: () -> Unit,
@@ -721,7 +742,7 @@ private fun DevicePicker(
             state.sensors.forEach { sensor ->
                 DeviceChip(
                     label = sensor.alias ?: sensor.name,
-                    style = seriesStyle(state.slots[sensor.address] ?: 0),
+                    style = seriesStyle(state.slots[sensor.address] ?: 0, coloring),
                     selected = sensor.address in state.selected,
                     hasData = state.readingsBySensor[sensor.address]?.isNotEmpty() != false,
                     onClick = { onToggle(sensor.address) }
@@ -732,9 +753,10 @@ private fun DevicePicker(
 }
 
 /**
- * One device in the picker. The chip can't preview the line's colour — that is
- * the reading, which changes along the line — so the swatch shows the one thing
- * that does identify the device: its stroke.
+ * One device in the picker, tinted with its own hue where it has one. Under value
+ * colouring it has none — the line's colour is the reading, and it changes along
+ * the line — so the chip falls back to the theme accent and lets the swatch carry
+ * identity with its stroke.
  */
 @Composable
 private fun DeviceChip(
@@ -744,7 +766,7 @@ private fun DeviceChip(
     hasData: Boolean,
     onClick: () -> Unit
 ) {
-    val accent = MaterialTheme.colorScheme.primary
+    val accent = style.color ?: MaterialTheme.colorScheme.primary
     Surface(
         shape = RoundedCornerShape(50),
         color = if (selected) accent.copy(alpha = 0.16f) else CardBg,
@@ -779,20 +801,41 @@ private fun DeviceChip(
 }
 
 /**
+ * Switches what a line's colour means: the reading, or the device.
+ *
+ * The icon shows the scheme in force rather than the one a tap would bring, so a
+ * glance at the bar answers "why is everything green" — the label says what the
+ * tap does.
+ */
+@Composable
+private fun ColoringToggle(coloring: SeriesColoring, onToggle: () -> Unit, tint: Color) {
+    val byValue = coloring == SeriesColoring.BY_VALUE
+    IconButton(onClick = onToggle) {
+        Icon(
+            if (byValue) Icons.Default.Thermostat else Icons.Default.Palette,
+            if (byValue) "Colour lines by device" else "Colour lines by reading",
+            tint = tint
+        )
+    }
+}
+
+/**
  * A short piece of the device's actual line: its dash pattern and weight, so the
  * legend matches what is drawn.
  *
- * Colour on the chart means the reading, not the device, so it cannot be baked in
- * here — [color] is the value's colour where the caller has one (the marker
+ * A device with its own hue is drawn in it. Under value colouring there is no
+ * fixed hue to show — the line's colour is the reading and changes along it — so
+ * [color] stands in: the value's colour where the caller has one (the marker
  * readout, where the swatch then matches the line exactly at the marker) and a
  * neutral where it doesn't (the picker, which lists devices with no data loaded).
  */
 @Composable
 private fun SeriesSwatch(style: SeriesStyle, selected: Boolean, color: Color = TextHi) {
     val effect = style.pathEffect
+    val paint = style.color ?: color
     Canvas(Modifier.size(width = 26.dp, height = 10.dp)) {
         drawLine(
-            color = if (selected) color else color.copy(alpha = 0.45f),
+            color = if (selected) paint else paint.copy(alpha = 0.45f),
             start = Offset(0f, size.height / 2),
             end = Offset(size.width, size.height / 2),
             // Dash lengths are canvas pixels, as on the chart, so the pattern

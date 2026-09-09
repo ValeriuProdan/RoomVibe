@@ -57,12 +57,14 @@ even when you're away from home.
   a second screen that plots several sensors on one shared axis, so you can see
   balcony-versus-living-room directly instead of eyeballing two charts. Tick devices
   on and off, and drag the marker to read every device's value at that moment
-  together with the spread between them. Because colour means the reading here
-  too, each device is told apart by its own line style — a dash pattern and weight
-  it keeps for good, repeated on its legend chip and in the marker readout. Where
-  the single-sensor chart dashes its min line, this one can't (the dash is already
-  saying *which sensor*), so a device's min line is drawn thinner and fainter than
-  its max.
+  together with the spread between them. The button in the top bar switches what
+  colour means: **by reading** (the comfort ramp, matching the single-sensor
+  charts — each device then told apart by its own dash pattern and weight), or
+  **by device** (one fixed hue each, from a colour-blind-safe palette). Either
+  way a device keeps its look for good, repeated on its legend chip and in the
+  marker readout. Where the single-sensor chart dashes its min line, this one
+  can't under reading colours — the dash is already saying *which sensor* — so a
+  device's min line is drawn thinner and fainter than its max.
 - **°C / °F** toggle.
 - **Google Drive backup & restore** — export/import all data as a JSON file via the
   system picker (no account setup required).

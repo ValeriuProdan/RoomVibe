@@ -5,6 +5,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import com.roomvibe.ui.chart.RangeStyle
+import com.roomvibe.ui.chart.SeriesColoring
 
 /**
  * Small persisted app-wide preferences (temperature unit, how zoomed-out charts
@@ -44,6 +45,23 @@ class AppSettings private constructor(context: Context) {
 
     // ── Compare chart ────────────────────────────────────────────────────────
 
+    /**
+     * What a compare line's colour means. Compare-only: the single-sensor charts
+     * have one line, so there is no identity for a hue to carry there.
+     */
+    private val _seriesColoring = MutableStateFlow(readSeriesColoring())
+    val seriesColoring: StateFlow<SeriesColoring> = _seriesColoring.asStateFlow()
+
+    fun setSeriesColoring(value: SeriesColoring) {
+        prefs.edit().putString(KEY_SERIES_COLORING, value.name).apply()
+        _seriesColoring.value = value
+    }
+
+    private fun readSeriesColoring(): SeriesColoring {
+        val stored = prefs.getString(KEY_SERIES_COLORING, null) ?: return SeriesColoring.BY_VALUE
+        return SeriesColoring.values().firstOrNull { it.name == stored } ?: SeriesColoring.BY_VALUE
+    }
+
     /** Devices currently plotted on the compare chart, or null if never chosen. */
     private val _compareSelection = MutableStateFlow(
         if (prefs.contains(KEY_COMPARE_SELECTION))
@@ -73,6 +91,7 @@ class AppSettings private constructor(context: Context) {
         private const val KEY_FAHRENHEIT = "fahrenheit"
         private const val KEY_RANGE_STYLE = "range_style"
         private const val KEY_COMPARE_SELECTION = "compare_selection"
+        private const val KEY_SERIES_COLORING = "series_coloring"
         private const val KEY_SERIES_SLOTS = "series_slots"
 
         @Volatile private var instance: AppSettings? = null
