@@ -56,6 +56,17 @@ jobs:
         run: |
           set -euo pipefail
           if [ -z "${KEYSTORE_BASE64:-}" ]; then
+            # A tag means a public Release. A debug-signed APK there installs
+            # for nobody who already has the app — Android rejects the
+            # signature change — so refuse the tag rather than publish one.
+            if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+              echo "::error::No signing secrets, so this tag would publish a" \
+                   "debug-signed APK that cannot update an installed RoomVibe." \
+                   "Add KEYSTORE_BASE64, KEYSTORE_PASSWORD, KEY_ALIAS and" \
+                   "KEY_PASSWORD under Settings → Secrets and variables →" \
+                   "Actions, then re-run this job."
+              exit 1
+            fi
             echo "No signing secrets set — building a debug-signed APK."
             echo "variant=debug" >> "$GITHUB_OUTPUT"
             exit 0
@@ -73,14 +84,20 @@ jobs:
       - name: Build APK
         run: ./gradlew assemble${{ steps.signing.outputs.variant == 'release' && 'Release' || 'Debug' }} --stacktrace
 
-      # One predictable name, so the download says which build it is.
+      # A release build keeps the name the published releases have always used;
+      # a branch build says which commit and variant it came from instead.
       - name: Name the APK
         id: apk
         run: |
           set -euo pipefail
-          src=$(find app/build/outputs/apk/${{ steps.signing.outputs.variant }} -name '*.apk' -print -quit)
+          variant=${{ steps.signing.outputs.variant }}
+          src=$(find "app/build/outputs/apk/$variant" -name '*.apk' -print -quit)
           version=$(grep -oP 'versionName\s*=\s*"\K[^"]+' app/build.gradle.kts)
-          name="roomvibe-${version}-${{ steps.signing.outputs.variant }}-${GITHUB_SHA::7}.apk"
+          if [ "$variant" = "release" ]; then
+            name="RoomVibe-${version}.apk"
+          else
+            name="roomvibe-${version}-debug-${GITHUB_SHA::7}.apk"
+          fi
           mkdir -p dist && cp "$src" "dist/$name"
           echo "name=$name" >> "$GITHUB_OUTPUT"
 
@@ -95,4 +112,6 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${GITHUB_REF_NAME}" dist/*.apk --generate-notes
+        run: |
+          gh release create "${GITHUB_REF_NAME}" dist/*.apk \
+            --title "RoomVibe ${GITHUB_REF_NAME#v}" --generate-notes
