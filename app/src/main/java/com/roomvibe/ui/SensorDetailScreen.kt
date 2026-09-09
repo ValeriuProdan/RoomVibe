@@ -70,7 +70,10 @@ fun SensorDetailScreen(
     val context = LocalContext.current
     val settings = AppSettings.get(context)
     val fahrenheit by settings.fahrenheit.collectAsStateWithLifecycle()
-    val rangeStyle by settings.rangeStyle.collectAsStateWithLifecycle()
+    val rangeStyle by settings.monitorRangeStyle.collectAsStateWithLifecycle()
+    val onCycleRangeStyle = remember(settings) {
+        { settings.setMonitorRangeStyle(settings.monitorRangeStyle.value.next()) }
+    }
     var showGattExplorer by remember { mutableStateOf(false) }
     // rememberSaveable so zoom/pan and the scrubber survive rotation
     var viewport by rememberSaveable(stateSaver = ViewportSaver) { mutableStateOf<Viewport?>(null) }
@@ -134,6 +137,7 @@ fun SensorDetailScreen(
                         actionIconContentColor = Color.White
                     ),
                     actions = {
+                        RangeStyleToggle(rangeStyle, onCycleRangeStyle, Color.White)
                         if (state.isRefreshing) {
                             IconButton(onClick = { viewModel.cancelRefresh() }) {
                                 Icon(Icons.Default.Close, "Cancel sync")
@@ -210,6 +214,7 @@ fun SensorDetailScreen(
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White)
                         }
                         MetricToggle(selected = landscapeMetric, onSelect = { landscapeMetric = it })
+                        RangeStyleToggle(rangeStyle, onCycleRangeStyle, Color.White)
                         if (state.isRefreshing) {
                             IconButton(onClick = { viewModel.cancelRefresh() }) {
                                 Icon(Icons.Default.Close, "Cancel sync", tint = Color.White)

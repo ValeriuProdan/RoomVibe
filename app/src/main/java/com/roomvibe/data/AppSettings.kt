@@ -25,21 +25,45 @@ class AppSettings private constructor(context: Context) {
     // ── Charts ───────────────────────────────────────────────────────────────
 
     /**
-     * What every chart draws for a day or month bucket. One app-wide choice: the
-     * single-sensor and compare charts answering the same question differently is
-     * what made them hard to read side by side.
+     * What a day or month bucket draws, held once per *kind* of chart rather than
+     * once for the app or once per sensor.
+     *
+     * The two kinds get read for different things — one room over time, against
+     * several rooms side by side — and the style that suits one often doesn't suit
+     * the other, so they no longer share a single value. Within a kind it stays
+     * shared: setting it on one sensor's chart sets it for every sensor, because
+     * charts that answer the same question differently are what made them hard to
+     * read against each other in the first place.
      */
-    private val _rangeStyle = MutableStateFlow(readRangeStyle())
-    val rangeStyle: StateFlow<RangeStyle> = _rangeStyle.asStateFlow()
+    private val _monitorRangeStyle = MutableStateFlow(readRangeStyle(KEY_RANGE_STYLE))
+    val monitorRangeStyle: StateFlow<RangeStyle> = _monitorRangeStyle.asStateFlow()
 
-    fun setRangeStyle(value: RangeStyle) {
+    fun setMonitorRangeStyle(value: RangeStyle) {
         prefs.edit().putString(KEY_RANGE_STYLE, value.name).apply()
-        _rangeStyle.value = value
+        _monitorRangeStyle.value = value
     }
 
-    /** Falls back to the default for a missing value, and for one a downgrade wrote. */
-    private fun readRangeStyle(): RangeStyle {
-        val stored = prefs.getString(KEY_RANGE_STYLE, null) ?: return RangeStyle.MIN_MAX
+    /**
+     * Falls back to [KEY_RANGE_STYLE], the one app-wide value that drove both kinds
+     * before the split, so upgrading keeps the compare chart drawn the way it was
+     * last left rather than resetting it to the default.
+     */
+    private val _compareRangeStyle =
+        MutableStateFlow(readRangeStyle(KEY_COMPARE_RANGE_STYLE, KEY_RANGE_STYLE))
+    val compareRangeStyle: StateFlow<RangeStyle> = _compareRangeStyle.asStateFlow()
+
+    fun setCompareRangeStyle(value: RangeStyle) {
+        prefs.edit().putString(KEY_COMPARE_RANGE_STYLE, value.name).apply()
+        _compareRangeStyle.value = value
+    }
+
+    /**
+     * Reads the first key that holds a value, falling back to the default for a
+     * missing one and for one a downgrade wrote.
+     */
+    private fun readRangeStyle(vararg keys: String): RangeStyle {
+        val stored = keys.firstNotNullOfOrNull { prefs.getString(it, null) }
+            ?: return RangeStyle.MIN_MAX
         return RangeStyle.values().firstOrNull { it.name == stored } ?: RangeStyle.MIN_MAX
     }
 
@@ -90,6 +114,7 @@ class AppSettings private constructor(context: Context) {
     companion object {
         private const val KEY_FAHRENHEIT = "fahrenheit"
         private const val KEY_RANGE_STYLE = "range_style"
+        private const val KEY_COMPARE_RANGE_STYLE = "compare_range_style"
         private const val KEY_COMPARE_SELECTION = "compare_selection"
         private const val KEY_SERIES_COLORING = "series_coloring"
         private const val KEY_SERIES_SLOTS = "series_slots"

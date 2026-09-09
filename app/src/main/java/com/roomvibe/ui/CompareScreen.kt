@@ -121,7 +121,7 @@ fun CompareScreen(
     val context = LocalContext.current
     val settings = AppSettings.get(context)
     val fahrenheit by settings.fahrenheit.collectAsStateWithLifecycle()
-    val rangeStyle by settings.rangeStyle.collectAsStateWithLifecycle()
+    val rangeStyle by settings.compareRangeStyle.collectAsStateWithLifecycle()
     val coloring by settings.seriesColoring.collectAsStateWithLifecycle()
     val onToggleColoring = remember(settings) {
         {
@@ -130,6 +130,9 @@ fun CompareScreen(
                 else SeriesColoring.BY_VALUE
             )
         }
+    }
+    val onCycleRangeStyle = remember(settings) {
+        { settings.setCompareRangeStyle(settings.compareRangeStyle.value.next()) }
     }
     val isLandscape = LocalConfiguration.current.orientation == Configuration.ORIENTATION_LANDSCAPE
 
@@ -237,7 +240,10 @@ fun CompareScreen(
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back to sensors")
                         }
                     },
-                    actions = { ColoringToggle(coloring, onToggleColoring, Color.White) },
+                    actions = {
+                        RangeStyleToggle(rangeStyle, onCycleRangeStyle, Color.White)
+                        ColoringToggle(coloring, onToggleColoring, Color.White)
+                    },
                     colors = TopAppBarDefaults.topAppBarColors(
                         containerColor = ScreenBg,
                         titleContentColor = Color.White,
@@ -271,6 +277,8 @@ fun CompareScreen(
                 onNone = onNone,
                 coloring = coloring,
                 onToggleColoring = onToggleColoring,
+                rangeStyle = rangeStyle,
+                onCycleRangeStyle = onCycleRangeStyle,
                 onBack = onBack
             )
             return@Scaffold
@@ -359,6 +367,8 @@ private fun CompareLandscape(
     onNone: () -> Unit,
     coloring: SeriesColoring,
     onToggleColoring: () -> Unit,
+    rangeStyle: RangeStyle,
+    onCycleRangeStyle: () -> Unit,
     onBack: () -> Unit
 ) {
     var showDevices by rememberSaveable { mutableStateOf(false) }
@@ -399,6 +409,7 @@ private fun CompareLandscape(
                     }
                     if (i == 0) Spacer(Modifier.width(4.dp))
                 }
+                RangeStyleToggle(rangeStyle, onCycleRangeStyle, Color.White)
                 ColoringToggle(coloring, onToggleColoring, Color.White)
                 IconButton(onClick = { showDevices = !showDevices }) {
                     Icon(

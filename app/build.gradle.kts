@@ -62,6 +62,9 @@ android {
 
     buildFeatures {
         compose = true
+        // Generates BuildConfig.VERSION_NAME/VERSION_CODE, which the overflow menu
+        // shows so a build can be named in a bug report.
+        buildConfig = true
     }
 
     packaging {

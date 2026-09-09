@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.roomvibe.BuildConfig
 import com.roomvibe.R
 import com.roomvibe.ble.FoundDevice
 import com.roomvibe.ble.LywsdProtocol
@@ -45,7 +46,6 @@ import com.roomvibe.data.AppSettings
 import com.roomvibe.data.SyncState
 import com.roomvibe.data.formatTemp
 import com.roomvibe.data.entity.Sensor
-import com.roomvibe.ui.chart.RangeStyle
 import com.roomvibe.viewmodel.SensorListViewModel
 import com.roomvibe.viewmodel.TempProbe
 import kotlinx.coroutines.launch
@@ -54,13 +54,6 @@ import java.util.*
 
 private fun requiredBlePermissions(): Array<String> = blePermissionsFor(Build.VERSION.SDK_INT)
 private fun requiredConnectPermissions(): Array<String> = connectPermissionsFor(Build.VERSION.SDK_INT)
-
-/** The chart line styles, in the order they read as least to most detail. */
-private val RANGE_STYLE_LABELS = listOf(
-    RangeStyle.MAX_ONLY to "Max only",
-    RangeStyle.MIN_MAX to "Min & max",
-    RangeStyle.MIDPOINT_AREA to "Midpoint + range"
-)
 
 // Brand wordmark styling (Pacifico script, orange to match the app icon)
 private val BrandFont = FontFamily(Font(R.font.pacifico_regular))
@@ -77,7 +70,6 @@ fun SensorListScreen(
     val context = LocalContext.current
     val settings = remember { AppSettings.get(context) }
     val fahrenheit by settings.fahrenheit.collectAsStateWithLifecycle()
-    val rangeStyle by settings.rangeStyle.collectAsStateWithLifecycle()
     var showScanSheet by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<Sensor?>(null) }
     var menuOpen by remember { mutableStateOf(false) }
@@ -183,28 +175,16 @@ fun SensorListScreen(
                                 }
                             )
                             HorizontalDivider()
-                            // Applies to every chart. Only bites once a chart is
-                            // zoomed out past hourly, where a point covers a whole
-                            // day and there is a range to choose how to show.
+                            // Not actionable: the one place to read which build this
+                            // is, so a bug report can name it.
                             Text(
-                                "Zoomed out, show",
+                                "RoomVibe ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 2.dp)
-                            )
-                            RANGE_STYLE_LABELS.forEach { (style, label) ->
-                                DropdownMenuItem(
-                                    text = { Text(label) },
-                                    leadingIcon = {
-                                        if (style == rangeStyle) Icon(Icons.Default.Check, null)
-                                        else Spacer(Modifier.size(24.dp))
-                                    },
-                                    onClick = {
-                                        settings.setRangeStyle(style)
-                                        menuOpen = false
-                                    }
+                                modifier = Modifier.padding(
+                                    start = 12.dp, end = 12.dp, top = 10.dp, bottom = 8.dp
                                 )
-                            }
+                            )
                         }
                     }
                 }
