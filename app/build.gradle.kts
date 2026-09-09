@@ -24,8 +24,8 @@ android {
         applicationId = "com.thermolog"
         minSdk = 26
         targetSdk = 36
-        versionCode = 5
-        versionName = "1.4"
+        versionCode = 6
+        versionName = "1.5"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
     }
@@ -62,6 +62,9 @@ android {
 
     buildFeatures {
         compose = true
+        // Generates BuildConfig.VERSION_NAME/VERSION_CODE, which the overflow menu
+        // shows so a build can be named in a bug report.
+        buildConfig = true
     }
 
     packaging {

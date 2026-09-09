@@ -8,8 +8,11 @@ import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items as lazyItems
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -36,6 +39,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.roomvibe.BuildConfig
 import com.roomvibe.R
 import com.roomvibe.ble.FoundDevice
 import com.roomvibe.ble.LywsdProtocol
@@ -45,7 +49,6 @@ import com.roomvibe.data.AppSettings
 import com.roomvibe.data.SyncState
 import com.roomvibe.data.formatTemp
 import com.roomvibe.data.entity.Sensor
-import com.roomvibe.ui.chart.RangeStyle
 import com.roomvibe.viewmodel.SensorListViewModel
 import com.roomvibe.viewmodel.TempProbe
 import kotlinx.coroutines.launch
@@ -55,13 +58,6 @@ import java.util.*
 private fun requiredBlePermissions(): Array<String> = blePermissionsFor(Build.VERSION.SDK_INT)
 private fun requiredConnectPermissions(): Array<String> = connectPermissionsFor(Build.VERSION.SDK_INT)
 
-/** The chart line styles, in the order they read as least to most detail. */
-private val RANGE_STYLE_LABELS = listOf(
-    RangeStyle.MAX_ONLY to "Max only",
-    RangeStyle.MIN_MAX to "Min & max",
-    RangeStyle.MIDPOINT_AREA to "Midpoint + range"
-)
-
 // Brand wordmark styling (Pacifico script, orange to match the app icon)
 private val BrandFont = FontFamily(Font(R.font.pacifico_regular))
 private val BrandOrange = Color(0xFFFF7A1A)
@@ -70,14 +66,12 @@ private val BrandOrange = Color(0xFFFF7A1A)
 @Composable
 fun SensorListScreen(
     viewModel: SensorListViewModel,
-    onOpenSensor: (String) -> Unit,
-    onOpenCompare: () -> Unit = {}
+    onOpenSensor: (String) -> Unit
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val settings = remember { AppSettings.get(context) }
     val fahrenheit by settings.fahrenheit.collectAsStateWithLifecycle()
-    val rangeStyle by settings.rangeStyle.collectAsStateWithLifecycle()
     var showScanSheet by remember { mutableStateOf(false) }
     var renameTarget by remember { mutableStateOf<Sensor?>(null) }
     var menuOpen by remember { mutableStateOf(false) }
@@ -146,9 +140,28 @@ fun SensorListScreen(
                     titleContentColor = BrandOrange
                 ),
                 actions = {
-                    // Also reachable by swiping left — this is the discoverable way in.
-                    IconButton(onClick = onOpenCompare) {
-                        Icon(Icons.Default.StackedLineChart, "Compare devices", tint = Color.White)
+                    if (state.isSyncingAll) {
+                        IconButton(
+                            onClick = { viewModel.cancelSyncAll() },
+                            modifier = Modifier
+                                .padding(4.dp)
+                                .size(40.dp)
+                                .background(Color(0xFFD32F2F), CircleShape)
+                        ) {
+                            Icon(Icons.Default.Close, "Stop syncing", tint = Color.White)
+                        }
+                    } else {
+                        IconButton(
+                            onClick = {
+                                withPermission(requiredConnectPermissions()) { viewModel.syncAll() }
+                            },
+                            enabled = state.sensors.isNotEmpty()
+                        ) {
+                            Icon(
+                                Icons.Default.Sync, "Sync all sensors",
+                                tint = if (state.sensors.isEmpty()) Color.White.copy(alpha = 0.4f) else Color.White
+                            )
+                        }
                     }
                     Box {
                         IconButton(onClick = { menuOpen = true }) {
@@ -183,28 +196,16 @@ fun SensorListScreen(
                                 }
                             )
                             HorizontalDivider()
-                            // Applies to every chart. Only bites once a chart is
-                            // zoomed out past hourly, where a point covers a whole
-                            // day and there is a range to choose how to show.
+                            // Not actionable: the one place to read which build this
+                            // is, so a bug report can name it.
                             Text(
-                                "Zoomed out, show",
+                                "RoomVibe ${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})",
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 2.dp)
-                            )
-                            RANGE_STYLE_LABELS.forEach { (style, label) ->
-                                DropdownMenuItem(
-                                    text = { Text(label) },
-                                    leadingIcon = {
-                                        if (style == rangeStyle) Icon(Icons.Default.Check, null)
-                                        else Spacer(Modifier.size(24.dp))
-                                    },
-                                    onClick = {
-                                        settings.setRangeStyle(style)
-                                        menuOpen = false
-                                    }
+                                modifier = Modifier.padding(
+                                    start = 12.dp, end = 12.dp, top = 10.dp, bottom = 8.dp
                                 )
-                            }
+                            )
                         }
                     }
                 }
@@ -220,6 +221,10 @@ fun SensorListScreen(
             }
         }
     ) { pad ->
+      Column(Modifier.padding(pad).fillMaxSize()) {
+        if (state.isSyncingAll) {
+            SyncAllBanner(done = state.syncAllDone, total = state.syncAllTotal)
+        }
         // Two sensors per row.
         LazyVerticalGrid(
             columns = GridCells.Fixed(2),
@@ -227,7 +232,7 @@ fun SensorListScreen(
             contentPadding = PaddingValues(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 44.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
-            modifier = Modifier.padding(pad).fillMaxSize()
+            modifier = Modifier.fillMaxSize()
         ) {
             if (state.sensors.isEmpty()) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
@@ -256,6 +261,7 @@ fun SensorListScreen(
                 )
             }
         }
+      }
     }
 
     if (showScanSheet) {
@@ -365,6 +371,33 @@ fun SensorListScreen(
                     Text("Working…")
                 }
             }
+        }
+    }
+}
+
+/**
+ * Progress across a "sync all" run. Each card already shows its own state, so
+ * this only answers "how far through the set are we" — useful when you start it
+ * and put the phone down.
+ */
+@Composable
+private fun SyncAllBanner(done: Int, total: Int) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+        shape = RoundedCornerShape(50),
+        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.18f)
+    ) {
+        Row(
+            Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp,
+                color = MaterialTheme.colorScheme.primary)
+            Spacer(Modifier.width(10.dp))
+            Text(
+                "Syncing ${(done + 1).coerceAtMost(total)} of $total — one at a time",
+                style = MaterialTheme.typography.labelLarge
+            )
         }
     }
 }

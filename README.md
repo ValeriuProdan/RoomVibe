@@ -45,10 +45,11 @@ even when you're away from home.
 - **Zoomable timeline charts** — pinch to zoom smoothly from hourly detail out to
   days and months; drag to scroll through time; tap/drag to inspect exact values.
 - **Choose what a zoomed-out day shows** — a day covers a range of readings, not
-  one, so the ⋮ menu picks how every chart draws it: **Max only**, **Min & max**
-  (the default — two lines), or **Midpoint + range** (one line with the whole
-  range shaded behind it). One setting, applied to the single-sensor and compare
-  charts alike.
+  one, so a button in the chart's top bar cycles how it's drawn: **Max only**,
+  **Min & max** (the default — two lines), or **Midpoint + range** (one line with
+  the whole range shaded behind it). The sensor charts and the compare chart keep
+  the choice separately, since they get read for different things; within each,
+  the setting is shared, so changing it on one sensor changes it for all of them.
 - **Comfort-coloured lines** — temperature is coloured by human thermal comfort
   (green ≈ 20–25 °C, blue when cold, red when hot); humidity is green at the ideal
   (~48%) and red at the dry/humid extremes. The compare screen uses the same ramp,
@@ -57,8 +58,8 @@ even when you're away from home.
   a second screen that plots several sensors on one shared axis, so you can see
   balcony-versus-living-room directly instead of eyeballing two charts. Tick devices
   on and off, and drag the marker to read every device's value at that moment
-  together with the spread between them. The button in the top bar switches what
-  colour means: **by reading** (the comfort ramp, matching the single-sensor
+  together with the spread between them. Beside the range button, a second one
+  switches what colour means: **by reading** (the comfort ramp, matching the single-sensor
   charts — each device then told apart by its own dash pattern and weight), or
   **by device** (one fixed hue each, from a colour-blind-safe palette). Either
   way a device keeps its look for good, repeated on its legend chip and in the

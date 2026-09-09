@@ -96,8 +96,7 @@ private fun HomePager(onOpenSensor: (String) -> Unit) {
             when (page) {
                 PAGE_SENSORS -> SensorListScreen(
                     viewModel = listVm,
-                    onOpenSensor = onOpenSensor,
-                    onOpenCompare = { goTo(PAGE_COMPARE) }
+                    onOpenSensor = onOpenSensor
                 )
                 else -> CompareScreen(
                     viewModel = compareVm,

@@ -211,7 +211,8 @@ fun CompareChart(
         // Direct labels: a few lines name themselves, so reading the chart doesn't
         // need a trip to the legend.
         if (plotted.size in 2..MAX_DIRECT_LABELS) {
-            drawEndLabels(textMeasurer, plotted, metric, upperPart, plotRight = PAD_L + w,
+            drawEndLabels(textMeasurer, plotted, metric, upperPart, lowerPart,
+                plotRight = PAD_L + w,
                 plotTop = PAD_T, plotBottom = PAD_T + h,
                 xOf = { t -> xOf(t) }, yOf = { v -> yOf(v) })
         }
@@ -272,9 +273,25 @@ fun CompareChart(
 private const val END_SWATCH_W = 18f
 private const val END_SWATCH_GAP = 5f
 
+/** Breathing room between a name's plate and the right axis. */
+private const val END_AXIS_GAP = 6f
+
+/** Clearance kept between a name and any line, and between one name and the next. */
+private const val END_LABEL_CLEARANCE = 4f
+
 /**
- * Names each line at its right-hand end, nudging labels apart vertically when the
- * lines end close together so they never overlap.
+ * Names each line, floated as close to its own right-hand end as it can get
+ * without landing on top of any line.
+ *
+ * Every name shares the chart's right edge, so one column range covers them all.
+ * Each drawn line's vertical span across that range is treated as occupied — the
+ * whole min-to-max sweep, not the pixels it actually inks, so a name can never
+ * land between two waves of the same line. What's left over is the free gaps, and
+ * each name drops into the gap that puts it nearest the line it belongs to.
+ *
+ * A name that has nowhere clear to go is dropped rather than drawn over a line:
+ * the chips below the chart already name every device, so a missing one costs
+ * less than an unreadable one.
  *
  * Each name is preceded by a short sample of its own stroke, and sits in the
  * colour its line has there. Under value colouring that colour is the reading
@@ -284,7 +301,8 @@ private fun DrawScope.drawEndLabels(
     textMeasurer: TextMeasurer,
     series: List<CompareSeries>,
     metric: Metric,
-    part: Part,
+    upperPart: Part,
+    lowerPart: Part,
     plotRight: Float,
     plotTop: Float,
     plotBottom: Float,
@@ -295,38 +313,97 @@ private fun DrawScope.drawEndLabels(
         val layout: TextLayoutResult,
         val style: SeriesStyle,
         val color: Color,
-        val anchorY: Float,
-        var y: Float
+        val anchorY: Float
     )
+
+    val lead = END_SWATCH_W + END_SWATCH_GAP
 
     val labels = series.mapNotNull { s ->
         val last = s.points.last()
         // Skip lines that end off-screen to the right — the label would float free.
         if (xOf(last.tMs) > plotRight + 4f) return@mapNotNull null
-        val color = s.style.color ?: metricColor(metric, last.value(part))
+        val color = s.style.color ?: metricColor(metric, last.value(upperPart))
         val layout = textMeasurer.measure(
             s.label.take(14),
             TextStyle(fontSize = 10.sp, color = color, fontWeight = FontWeight.SemiBold)
         )
-        val y = yOf(last.value(part)) - layout.size.height - 6f
-        EndLabel(layout, s.style, color, y, y)
+        EndLabel(layout, s.style, color, yOf(last.value(upperPart)))
     }.sortedBy { it.anchorY }
+    if (labels.isEmpty()) return
 
-    // Single downward pass is enough for a handful of labels: push each one below
-    // the previous, then clamp the whole stack into the plot band.
-    var minY = plotTop
-    for (l in labels) {
-        l.y = maxOf(l.y, minY)
-        minY = l.y + l.layout.size.height + 2f
+    val x1 = plotRight - END_AXIS_GAP
+    val x0 = (x1 - (labels.maxOf { it.layout.size.width } + lead)).coerceAtLeast(PAD_L)
+
+    // What every drawn line occupies in that column range.
+    val parts = if (upperPart == lowerPart) listOf(upperPart) else listOf(upperPart, lowerPart)
+    val blocked = mutableListOf<ClosedFloatingPointRange<Float>>()
+    for (s in series) for (part in parts) {
+        var lo = Float.POSITIVE_INFINITY
+        var hi = Float.NEGATIVE_INFINITY
+        var ax = Float.NaN
+        var ay = 0f
+        for (pt in s.points) {
+            val bx = xOf(pt.tMs)
+            val by = yOf(pt.value(part))
+            // Clip each segment to the column range, so a line that merely crosses
+            // it counts for the stretch that shows rather than its whole length.
+            if (!ax.isNaN() && maxOf(ax, bx) >= x0 && minOf(ax, bx) <= x1) {
+                val run = bx - ax
+                val segLo = minOf(ax, bx)
+                val segHi = maxOf(ax, bx)
+                val yAtC0 = if (run == 0f) by else ay + (by - ay) * ((x0.coerceIn(segLo, segHi) - ax) / run)
+                val yAtC1 = if (run == 0f) by else ay + (by - ay) * ((x1.coerceIn(segLo, segHi) - ax) / run)
+                lo = minOf(lo, yAtC0, yAtC1)
+                hi = maxOf(hi, yAtC0, yAtC1)
+            }
+            ax = bx
+            ay = by
+        }
+        if (lo <= hi) blocked += (lo - END_LABEL_CLEARANCE)..(hi + END_LABEL_CLEARANCE)
     }
-    val overflow = minY - plotBottom
-    if (overflow > 0f) labels.forEach { it.y = (it.y - overflow).coerceAtLeast(plotTop) }
 
-    val lead = END_SWATCH_W + END_SWATCH_GAP
+    val gaps = freeGaps(blocked, plotTop, plotBottom).toMutableList()
+
+    // Names keep the vertical order of the lines they belong to: the name of the
+    // higher line stays higher. Where two lines run close together the eye pairs
+    // name to line by position first, so a pair in the wrong order reads as a
+    // straight mislabelling — worse than dropping one. `floor` walks down the plot
+    // as each name is placed, which also keeps them off each other.
+    var floor = plotTop
     for (l in labels) {
-        val x = (plotRight - l.layout.size.width).coerceAtLeast(PAD_L + lead)
-        drawText(l.layout, topLeft = Offset(x, l.y))
-        val cy = l.y + l.layout.size.height / 2f
+        val h = l.layout.size.height.toFloat()
+        // Preferred spot: just above its own line's end, so the name reads as
+        // belonging to the line beneath it.
+        val want = l.anchorY - h - 6f
+
+        // Two passes, because *which side* matters more than raw distance: a name
+        // with its line directly beneath it is read as labelling that line, while
+        // the same name a few pixels below sits under a line it doesn't belong to.
+        // So take the nearest clear spot that sits above the line, and only settle
+        // for below when nothing above fits.
+        var bestGap = -1
+        var bestY = 0f
+        for (aboveOnly in booleanArrayOf(true, false)) {
+            var bestDist = Float.MAX_VALUE
+            gaps.forEachIndexed { i, g ->
+                val lo = maxOf(g.start, floor)
+                if (g.endInclusive - lo < h) return@forEachIndexed
+                val y = want.coerceIn(lo, g.endInclusive - h)
+                if (aboveOnly && y + h > l.anchorY) return@forEachIndexed
+                val dist = kotlin.math.abs((y + h / 2f) - l.anchorY)
+                if (dist < bestDist) {
+                    bestDist = dist
+                    bestGap = i
+                    bestY = y
+                }
+            }
+            if (bestGap >= 0) break
+        }
+        if (bestGap < 0) continue   // nowhere clear: leave this one to the chips
+
+        val x = (x1 - l.layout.size.width).coerceAtLeast(PAD_L + lead)
+        drawText(l.layout, topLeft = Offset(x, bestY))
+        val cy = bestY + h / 2f
         drawLine(
             l.color,
             Offset(x - lead, cy), Offset(x - END_SWATCH_GAP, cy),
@@ -334,5 +411,7 @@ private fun DrawScope.drawEndLabels(
             cap = StrokeCap.Round,
             pathEffect = l.style.pathEffect
         )
+        floor = bestY + h + END_LABEL_CLEARANCE
     }
+
 }
