@@ -241,7 +241,9 @@ fun CompareScreen(
                         }
                     },
                     actions = {
-                        RangeStyleToggle(rangeStyle, onCycleRangeStyle, Color.White)
+                        if (lod != Lod.HOURLY) {
+                            RangeStyleToggle(rangeStyle, onCycleRangeStyle, Color.White)
+                        }
                         ColoringToggle(coloring, onToggleColoring, Color.White)
                     },
                     colors = TopAppBarDefaults.topAppBarColors(
@@ -409,7 +411,9 @@ private fun CompareLandscape(
                     }
                     if (i == 0) Spacer(Modifier.width(4.dp))
                 }
-                RangeStyleToggle(rangeStyle, onCycleRangeStyle, Color.White)
+                if (lod != Lod.HOURLY) {
+                    RangeStyleToggle(rangeStyle, onCycleRangeStyle, Color.White)
+                }
                 ColoringToggle(coloring, onToggleColoring, Color.White)
                 IconButton(onClick = { showDevices = !showDevices }) {
                     Icon(

@@ -63,8 +63,7 @@ private val BrandOrange = Color(0xFFFF7A1A)
 @Composable
 fun SensorListScreen(
     viewModel: SensorListViewModel,
-    onOpenSensor: (String) -> Unit,
-    onOpenCompare: () -> Unit = {}
+    onOpenSensor: (String) -> Unit
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
@@ -138,10 +137,6 @@ fun SensorListScreen(
                     titleContentColor = BrandOrange
                 ),
                 actions = {
-                    // Also reachable by swiping left — this is the discoverable way in.
-                    IconButton(onClick = onOpenCompare) {
-                        Icon(Icons.Default.StackedLineChart, "Compare devices", tint = Color.White)
-                    }
                     Box {
                         IconButton(onClick = { menuOpen = true }) {
                             Icon(Icons.Default.MoreVert, "More", tint = Color.White)

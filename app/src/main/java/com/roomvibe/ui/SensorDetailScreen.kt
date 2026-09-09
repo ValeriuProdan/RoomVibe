@@ -33,10 +33,12 @@ import com.roomvibe.ble.connectPermissionsFor
 import com.roomvibe.data.AppSettings
 import com.roomvibe.data.formatTemp
 import com.roomvibe.data.entity.Reading
+import com.roomvibe.ui.chart.Lod
 import com.roomvibe.ui.chart.Metric
 import com.roomvibe.ui.chart.MetricChart
 import com.roomvibe.ui.chart.RangeStyle
 import com.roomvibe.ui.chart.Viewport
+import com.roomvibe.ui.chart.lodFor
 import com.roomvibe.ui.chart.zoomLabel
 import com.roomvibe.viewmodel.SensorDetailViewModel
 import java.text.SimpleDateFormat
@@ -81,6 +83,9 @@ fun SensorDetailScreen(
     // Landscape shows one chart at a time: 0 = Temperature, 1 = Humidity
     var landscapeMetric by rememberSaveable { mutableStateOf(0) }
     val snackbarHostState = remember { SnackbarHostState() }
+    // Hourly plots one reading per point, so there is no range for the style to
+    // change: the control only appears once zoomed out far enough to do something.
+    val lod = viewport?.let { lodFor(it.span) } ?: Lod.HOURLY
 
     // Syncing connects over BLE, which needs BLUETOOTH_CONNECT on Android 12+.
     fun connectPerms(): Array<String> = connectPermissionsFor(Build.VERSION.SDK_INT)
@@ -137,7 +142,9 @@ fun SensorDetailScreen(
                         actionIconContentColor = Color.White
                     ),
                     actions = {
-                        RangeStyleToggle(rangeStyle, onCycleRangeStyle, Color.White)
+                        if (lod != Lod.HOURLY) {
+                            RangeStyleToggle(rangeStyle, onCycleRangeStyle, Color.White)
+                        }
                         if (state.isRefreshing) {
                             IconButton(onClick = { viewModel.cancelRefresh() }) {
                                 Icon(Icons.Default.Close, "Cancel sync")
@@ -214,7 +221,9 @@ fun SensorDetailScreen(
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back", tint = Color.White)
                         }
                         MetricToggle(selected = landscapeMetric, onSelect = { landscapeMetric = it })
-                        RangeStyleToggle(rangeStyle, onCycleRangeStyle, Color.White)
+                        if (lod != Lod.HOURLY) {
+                            RangeStyleToggle(rangeStyle, onCycleRangeStyle, Color.White)
+                        }
                         if (state.isRefreshing) {
                             IconButton(onClick = { viewModel.cancelRefresh() }) {
                                 Icon(Icons.Default.Close, "Cancel sync", tint = Color.White)
