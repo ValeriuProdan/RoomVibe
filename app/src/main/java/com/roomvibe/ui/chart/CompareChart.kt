@@ -7,7 +7,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.SolidColor
@@ -272,6 +274,9 @@ fun CompareChart(
 private const val END_SWATCH_W = 18f
 private const val END_SWATCH_GAP = 5f
 
+/** Breathing room between a name's plate and the right axis. */
+private const val END_AXIS_GAP = 6f
+
 /**
  * Names each line at its right-hand end, nudging labels apart vertically when the
  * lines end close together so they never overlap.
@@ -324,7 +329,21 @@ private fun DrawScope.drawEndLabels(
 
     val lead = END_SWATCH_W + END_SWATCH_GAP
     for (l in labels) {
-        val x = (plotRight - l.layout.size.width).coerceAtLeast(PAD_L + lead)
+        // Held clear of the axis line so the name doesn't run into the value
+        // labels sitting just past it.
+        val x = (plotRight - l.layout.size.width - END_AXIS_GAP).coerceAtLeast(PAD_L + lead)
+        // The names sit inside the plot, so without this the lines run straight
+        // through the text. Not quite opaque, so a line still reads as continuing
+        // behind the name rather than stopping at it.
+        drawRoundRect(
+            ChartSurface.copy(alpha = 0.88f),
+            topLeft = Offset(x - lead - 3f, l.y - 2f),
+            size = Size(
+                l.layout.size.width + lead + 6f,
+                l.layout.size.height + 4f
+            ),
+            cornerRadius = CornerRadius(4f, 4f)
+        )
         drawText(l.layout, topLeft = Offset(x, l.y))
         val cy = l.y + l.layout.size.height / 2f
         drawLine(

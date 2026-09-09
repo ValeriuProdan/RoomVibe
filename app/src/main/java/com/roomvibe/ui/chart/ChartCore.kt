@@ -46,6 +46,13 @@ internal const val PAD_R = 52f
 internal const val PAD_T = 34f   // header band: title (left) + scrubber date (right)
 internal const val PAD_B = 26f
 
+/**
+ * The surface every chart is drawn on. Labels that sit inside the plot paint a
+ * plate of it behind themselves so the lines they cover don't run through the
+ * text.
+ */
+internal val ChartSurface = Color(0xFF1B1D21)
+
 enum class Metric { TEMP, HUMIDITY }
 enum class Lod { HOURLY, DAILY, MONTHLY }
 
