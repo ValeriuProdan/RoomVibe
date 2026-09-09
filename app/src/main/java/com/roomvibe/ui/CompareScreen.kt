@@ -44,6 +44,7 @@ import com.roomvibe.ui.chart.SeriesStyle
 import com.roomvibe.ui.chart.Viewport
 import com.roomvibe.ui.chart.bucketAt
 import com.roomvibe.ui.chart.lodFor
+import com.roomvibe.ui.chart.metricColor
 import com.roomvibe.ui.chart.rememberTimeLabels
 import com.roomvibe.ui.chart.seriesStyle
 import com.roomvibe.ui.chart.zoomLabel
@@ -102,8 +103,9 @@ private val ViewportSaver = listSaver<Viewport?, Long>(
  * directly, rather than by flipping between two single-sensor charts.
  *
  * Temperature and humidity get their own view (never two scales on one chart);
- * any number of devices can be checked on and off, each keeping the colour it was
- * assigned when it was added.
+ * any number of devices can be checked on and off. Lines are coloured by the
+ * reading, the same ramp the single-sensor charts use, so each device is told
+ * apart by the stroke it was assigned when it was added.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -138,7 +140,7 @@ fun CompareScreen(
     val vp = viewport
     val lod = if (vp != null) lodFor(vp.span) else Lod.HOURLY
 
-    // Ordered by colour slot so the legend, the lines and the readout agree, and
+    // Ordered by style slot so the legend, the lines and the readout agree, and
     // so checking a device on or off never reshuffles the others.
     val selectedAddresses = remember(state.selected, state.slots) {
         state.selected.sortedBy { state.slots[it] ?: Int.MAX_VALUE }
@@ -516,7 +518,8 @@ private fun CompactReadout(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.align(Alignment.CenterVertically)
                 ) {
-                    SeriesSwatch(row.style, selected = bucket != null)
+                    SeriesSwatch(row.style, selected = bucket != null,
+                        color = bucket?.let { metricColor(metric, it.mid) } ?: TextLo)
                     Spacer(Modifier.width(5.dp))
                     Text(
                         row.label,
@@ -651,7 +654,8 @@ private fun ScrubReadout(
                     ) {
                         // A dimmed swatch and label mark a device that was simply
                         // not recording here, matching how its chip reads.
-                        SeriesSwatch(row.style, selected = bucket != null)
+                        SeriesSwatch(row.style, selected = bucket != null,
+                            color = bucket?.let { metricColor(metric, it.mid) } ?: TextLo)
                         Spacer(Modifier.width(8.dp))
                         Text(row.label, style = MaterialTheme.typography.bodySmall,
                             color = if (bucket != null) TextHi else TextLo,
@@ -723,6 +727,11 @@ private fun DevicePicker(
     }
 }
 
+/**
+ * One device in the picker. The chip can't preview the line's colour — that is
+ * the reading, which changes along the line — so the swatch shows the one thing
+ * that does identify the device: its stroke.
+ */
 @Composable
 private fun DeviceChip(
     label: String,
@@ -731,11 +740,12 @@ private fun DeviceChip(
     hasData: Boolean,
     onClick: () -> Unit
 ) {
+    val accent = MaterialTheme.colorScheme.primary
     Surface(
         shape = RoundedCornerShape(50),
-        color = if (selected) style.color.copy(alpha = 0.18f) else CardBg,
+        color = if (selected) accent.copy(alpha = 0.16f) else CardBg,
         modifier = Modifier
-            .border(1.dp, if (selected) style.color.copy(alpha = 0.7f) else Color(0xFF33363B),
+            .border(1.dp, if (selected) accent.copy(alpha = 0.7f) else Color(0xFF33363B),
                 RoundedCornerShape(50))
             .clickable(onClick = onClick)
     ) {
@@ -754,7 +764,7 @@ private fun DeviceChip(
             )
             if (selected) {
                 Spacer(Modifier.width(6.dp))
-                Icon(Icons.Default.Check, null, Modifier.size(14.dp), tint = style.color)
+                Icon(Icons.Default.Check, null, Modifier.size(14.dp), tint = accent)
             }
             if (!hasData) {
                 Spacer(Modifier.width(6.dp))
@@ -765,18 +775,25 @@ private fun DeviceChip(
 }
 
 /**
- * A short piece of the device's actual line — same colour and, past the eighth
- * device, the same dash pattern, so the legend matches what's drawn.
+ * A short piece of the device's actual line: its dash pattern and weight, so the
+ * legend matches what is drawn.
+ *
+ * Colour on the chart means the reading, not the device, so it cannot be baked in
+ * here — [color] is the value's colour where the caller has one (the marker
+ * readout, where the swatch then matches the line exactly at the marker) and a
+ * neutral where it doesn't (the picker, which lists devices with no data loaded).
  */
 @Composable
-private fun SeriesSwatch(style: SeriesStyle, selected: Boolean) {
+private fun SeriesSwatch(style: SeriesStyle, selected: Boolean, color: Color = TextHi) {
     val effect = style.pathEffect
-    Canvas(Modifier.size(width = 20.dp, height = 10.dp)) {
+    Canvas(Modifier.size(width = 26.dp, height = 10.dp)) {
         drawLine(
-            color = if (selected) style.color else style.color.copy(alpha = 0.45f),
+            color = if (selected) color else color.copy(alpha = 0.45f),
             start = Offset(0f, size.height / 2),
             end = Offset(size.width, size.height / 2),
-            strokeWidth = 3.5f * density,
+            // Dash lengths are canvas pixels, as on the chart, so the pattern
+            // repeats the same number of times whatever the screen density.
+            strokeWidth = style.width * density,
             cap = StrokeCap.Round,
             pathEffect = effect
         )

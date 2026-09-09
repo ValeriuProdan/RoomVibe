@@ -1,25 +1,32 @@
 package com.roomvibe.ui.chart
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
+/**
+ * Lines are coloured by their reading, so the stroke is the only thing that says
+ * which device a line belongs to. These tests pin that down.
+ */
 class SeriesPaletteTest {
 
-    @Test fun theFirstEightDevicesGetDistinctSolidColours() {
-        val styles = (0 until SERIES_HUE_COUNT).map { seriesStyle(it) }
-        assertEquals(SERIES_HUE_COUNT, styles.map { it.color }.toSet().size)
-        styles.forEach { assertNull("first ${SERIES_HUE_COUNT} lines are solid", it.dash) }
+    @Test fun theFirstDevicesGetDistinctDashPatternsAtOneWeight() {
+        val styles = (0 until SERIES_PATTERN_COUNT).map { seriesStyle(it) }
+        assertEquals(SERIES_PATTERN_COUNT, styles.map { it.dash }.toSet().size)
+        assertEquals("the first patterns share one weight", 1, styles.map { it.width }.toSet().size)
     }
 
-    /** Past eight the hue repeats, so the stroke pattern has to carry the difference. */
-    @Test fun repeatedHuesAreSeparatedByTheStrokePattern() {
+    @Test fun theFirstDeviceIsASolidLine() {
+        assertNull(seriesStyle(0).dash)
+    }
+
+    /** Past the last pattern the patterns repeat, so the weight has to differ. */
+    @Test fun repeatedPatternsAreSeparatedByTheStrokeWeight() {
         val first = seriesStyle(0)
-        val ninth = seriesStyle(SERIES_HUE_COUNT)
-        assertEquals(first.color, ninth.color)
-        assertNotEquals(first.dash, ninth.dash)
+        val wrapped = seriesStyle(SERIES_PATTERN_COUNT)
+        assertEquals(first.dash, wrapped.dash)
+        assertTrue("weights must differ", first.width != wrapped.width)
     }
 
     @Test fun everySlotUpToTheStyleCountIsUnique() {
@@ -27,10 +34,12 @@ class SeriesPaletteTest {
         assertEquals(SERIES_STYLE_COUNT, styles.toSet().size)
     }
 
+    @Test fun everyStrokeIsThickEnoughToSee() {
+        (0 until SERIES_STYLE_COUNT).forEach { assertTrue(seriesStyle(it).width >= 2f) }
+    }
+
     @Test fun slotsBeyondTheStyleCountStayValid() {
-        val far = seriesStyle(SERIES_STYLE_COUNT + 3)
-        assertTrue(far.color.alpha > 0f)
-        assertEquals(seriesStyle(3), far)
+        assertEquals(seriesStyle(3), seriesStyle(SERIES_STYLE_COUNT + 3))
     }
 
     @Test fun negativeSlotFallsBackToTheFirstStyle() {

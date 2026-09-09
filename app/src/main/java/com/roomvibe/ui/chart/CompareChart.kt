@@ -35,17 +35,21 @@ data class CompareSeries(
 )
 
 /** Below this many lines each one also gets its name drawn at its right-hand end. */
-private const val MAX_DIRECT_LABELS = 4
+private const val MAX_DIRECT_LABELS = 5
 
 /**
  * Several devices' readings for one metric, on one shared axis.
  *
  * Two measures never share a chart here — the screen picks temperature *or*
  * humidity, so a difference in height always means a difference in the same unit.
- * Identity is carried by colour (see [seriesStyle]) and never by colour alone:
- * the legend chips below the chart repeat every colour, up to four lines are
- * labelled directly at their right-hand end, and the scrubber readout names each
- * device beside its value.
+ *
+ * Colour is the metric's comfort ramp, exactly as on the single-sensor charts, so
+ * a room at 22 °C is the same green on both screens and "which of these rooms is
+ * cold" is answerable at a glance. Identity therefore rides on the stroke instead
+ * (see [seriesStyle]): each device has its own dash pattern and weight, which the
+ * legend chips and the marker readout repeat, up to [MAX_DIRECT_LABELS] lines name
+ * themselves at their right-hand end, and the readout lists every device by name
+ * beside its value.
  */
 @Composable
 fun CompareChart(
@@ -131,6 +135,16 @@ fun CompareChart(
             drawText(lbl, topLeft = Offset(PAD_L + w + 8f, y - lbl.size.height / 2))
         }
 
+        // The same value → colour mapping the single-sensor charts use, painted
+        // along each line so every stretch shows the reading it was taken from.
+        //
+        // One shader per device per frame: the band is drawn twice and the line
+        // once, and rebuilding the gradient for each of those was three times the
+        // work for no visible difference — the alpha varies, the colours don't.
+        val ramps = plotted.map { s ->
+            valueBrush(s.points, scale, Part.MID, alpha = 1f) { v -> metricColor(metric, v) }
+        }
+
         // Zoomed out, one point per day would hide the whole story — a day that ran
         // 5→18 °C and one that sat at 11 °C all day average out the same. So each
         // day/month bucket draws its min–max envelope: one closed path, filled and
@@ -142,19 +156,20 @@ fun CompareChart(
                 else -> 0.10f
             }
             val edge = Stroke(1.5f, cap = StrokeCap.Round, join = StrokeJoin.Round)
-            for (s in plotted) {
+            plotted.forEachIndexed { i, s ->
                 val band = paths.envelope(s.points, scale)
-                drawPath(band, s.style.color.copy(alpha = fillAlpha))
-                drawPath(band, s.style.color.copy(alpha = 0.55f), style = edge)
+                drawPath(band, ramps[i], alpha = fillAlpha)
+                drawPath(band, ramps[i], alpha = 0.55f, style = edge)
             }
         }
 
-        // The lines themselves, each in its device's colour
-        for (s in plotted) {
+        // The lines themselves: the metric's colour ramp along the stroke, the
+        // device's own dash pattern and weight across it.
+        plotted.forEachIndexed { i, s ->
             drawPath(
                 paths.line(s.points, scale, Part.MID),
-                s.style.color,
-                style = Stroke(3.5f, cap = StrokeCap.Round, join = StrokeJoin.Round,
+                ramps[i],
+                style = Stroke(s.style.width, cap = StrokeCap.Round, join = StrokeJoin.Round,
                     pathEffect = s.style.pathEffect)
             )
         }
@@ -162,7 +177,7 @@ fun CompareChart(
         // Direct labels: a few lines name themselves, so reading the chart doesn't
         // need a trip to the legend.
         if (plotted.size in 2..MAX_DIRECT_LABELS) {
-            drawEndLabels(textMeasurer, plotted, plotRight = PAD_L + w, plotTop = PAD_T,
+            drawEndLabels(textMeasurer, plotted, metric, plotRight = PAD_L + w, plotTop = PAD_T,
                 plotBottom = PAD_T + h, xOf = { t -> xOf(t) }, yOf = { v -> yOf(v) })
         }
 
@@ -199,7 +214,7 @@ fun CompareChart(
             // clock — and pretending otherwise would misplace the value.
             for (s in plotted) {
                 val near = s.points.bucketAt(sel, lod) ?: continue
-                drawScrubDot(xOf(near.tMs), yOf(near.mid), s.style.color)
+                drawScrubDot(xOf(near.tMs), yOf(near.mid), metricColor(metric, near.mid))
             }
             anchor?.let {
                 val stamp = textMeasurer.measure(
@@ -213,31 +228,47 @@ fun CompareChart(
     }
 }
 
+/** Width of the stroke sample drawn beside a direct label, plus its gap. */
+private const val END_SWATCH_W = 18f
+private const val END_SWATCH_GAP = 5f
+
 /**
  * Names each line at its right-hand end, nudging labels apart vertically when the
  * lines end close together so they never overlap.
+ *
+ * Each name is preceded by a short sample of its own stroke. The label sits in the
+ * colour the line ends on — which is the *value* there, not the device — so the
+ * sample is what actually ties the name back to a line.
  */
 private fun DrawScope.drawEndLabels(
     textMeasurer: TextMeasurer,
     series: List<CompareSeries>,
+    metric: Metric,
     plotRight: Float,
     plotTop: Float,
     plotBottom: Float,
     xOf: (Long) -> Float,
     yOf: (Float) -> Float
 ) {
-    data class EndLabel(val layout: TextLayoutResult, val color: Color, val anchorY: Float, var y: Float)
+    data class EndLabel(
+        val layout: TextLayoutResult,
+        val style: SeriesStyle,
+        val color: Color,
+        val anchorY: Float,
+        var y: Float
+    )
 
     val labels = series.mapNotNull { s ->
         val last = s.points.last()
         // Skip lines that end off-screen to the right — the label would float free.
         if (xOf(last.tMs) > plotRight + 4f) return@mapNotNull null
+        val color = metricColor(metric, last.mid)
         val layout = textMeasurer.measure(
             s.label.take(14),
-            TextStyle(fontSize = 10.sp, color = s.style.color, fontWeight = FontWeight.SemiBold)
+            TextStyle(fontSize = 10.sp, color = color, fontWeight = FontWeight.SemiBold)
         )
         val y = yOf(last.mid) - layout.size.height - 6f
-        EndLabel(layout, s.style.color, y, y)
+        EndLabel(layout, s.style, color, y, y)
     }.sortedBy { it.anchorY }
 
     // Single downward pass is enough for a handful of labels: push each one below
@@ -250,8 +281,17 @@ private fun DrawScope.drawEndLabels(
     val overflow = minY - plotBottom
     if (overflow > 0f) labels.forEach { it.y = (it.y - overflow).coerceAtLeast(plotTop) }
 
+    val lead = END_SWATCH_W + END_SWATCH_GAP
     for (l in labels) {
-        val x = (plotRight - l.layout.size.width).coerceAtLeast(PAD_L)
+        val x = (plotRight - l.layout.size.width).coerceAtLeast(PAD_L + lead)
         drawText(l.layout, topLeft = Offset(x, l.y))
+        val cy = l.y + l.layout.size.height / 2f
+        drawLine(
+            l.color,
+            Offset(x - lead, cy), Offset(x - END_SWATCH_GAP, cy),
+            strokeWidth = l.style.width,
+            cap = StrokeCap.Round,
+            pathEffect = l.style.pathEffect
+        )
     }
 }

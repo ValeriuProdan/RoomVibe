@@ -11,7 +11,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
-import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -25,9 +24,6 @@ import kotlin.math.abs
 import kotlin.math.ceil
 import kotlin.math.floor
 import kotlin.math.roundToInt
-
-/** Colour stops in the value-coloured line gradient. Past this, more is invisible. */
-private const val MAX_GRADIENT_STOPS = 64
 
 /**
  * A single dark-themed metric chart (temperature OR humidity) in the Mi-Home style:
@@ -130,40 +126,15 @@ fun MetricChart(
         }
 
         // Colour a value using the metric's ramp when colorByValue, else the accent
-        fun colorAt(v: Float): Color = when {
-            !colorByValue -> accent
-            metric == Metric.TEMP -> tempColor(v)
-            else -> humidColor(v)
-        }
+        fun colorAt(v: Float): Color = if (colorByValue) metricColor(metric, v) else accent
 
         // The primary line follows the midpoint at hourly detail, the daily maximum
         // when zoomed out (the minimum gets its own dashed line below).
         val primaryPart = if (lod == Lod.HOURLY) Part.MID else Part.HI
-        fun valueAt(i: Int, part: Part): Float {
-            val p = points[i]
-            return when (part) { Part.MID -> p.mid; Part.HI -> p.hi; Part.LO -> p.lo }
-        }
-
-        // Horizontal gradient brush that colours a line by each point's value.
-        // The shader is rebuilt every frame, so the stops are thinned to a fixed
-        // budget — well past the point where more of them are visible.
-        fun valueBrush(part: Part, alpha: Float): Brush {
-            val firstX = xOf(points.first().tMs); val lastX = xOf(points.last().tMs)
-            val gspan = lastX - firstX
-            if (gspan <= 0f) return SolidColor(colorAt(valueAt(0, part)).copy(alpha = alpha))
-            val stride = maxOf(1, points.size / MAX_GRADIENT_STOPS)
-            var prev = -1f
-            val stops = points.indices
-                .filter { it % stride == 0 || it == points.lastIndex }
-                .map { i ->
-                    var f = ((xOf(points[i].tMs) - firstX) / gspan).coerceIn(0f, 1f)
-                    if (f <= prev) f = (prev + 1e-4f).coerceAtMost(1f)
-                    prev = f
-                    f to colorAt(valueAt(i, part)).copy(alpha = alpha)
-                }
-            return Brush.linearGradient(colorStops = stops.toTypedArray(),
-                start = Offset(firstX, 0f), end = Offset(lastX, 0f))
-        }
+        // Horizontal gradient that colours the line by each point's own value —
+        // the same brush the compare chart paints its lines with.
+        fun lineBrush(part: Part, alpha: Float): Brush =
+            valueBrush(points, scale, part, alpha) { v -> colorAt(v) }
 
         // Fill under the primary line (skipped for the value-coloured temperature line)
         if (!colorByValue) {
@@ -179,7 +150,7 @@ fun MetricChart(
         // hands back one reused Path, so never hold two at once.
         val lineStroke = Stroke(4.0f, cap = StrokeCap.Round, join = StrokeJoin.Round)
         if (colorByValue) {
-            drawPath(paths.line(points, scale, primaryPart), valueBrush(primaryPart, alpha = 1f), style = lineStroke)
+            drawPath(paths.line(points, scale, primaryPart), lineBrush(primaryPart, alpha = 1f), style = lineStroke)
         } else {
             drawPath(paths.line(points, scale, primaryPart), accent, style = lineStroke)
         }
@@ -188,7 +159,7 @@ fun MetricChart(
         if (lod != Lod.HOURLY) {
             val minStroke = Stroke(3.0f, cap = StrokeCap.Round, join = StrokeJoin.Round, pathEffect = dash)
             if (colorByValue) {
-                drawPath(paths.line(points, scale, Part.LO), valueBrush(Part.LO, alpha = 0.9f), style = minStroke)
+                drawPath(paths.line(points, scale, Part.LO), lineBrush(Part.LO, alpha = 0.9f), style = minStroke)
             } else {
                 drawPath(paths.line(points, scale, Part.LO), accent.copy(alpha = 0.6f), style = minStroke)
             }
