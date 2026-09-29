@@ -2,6 +2,7 @@ package com.roomvibe
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
@@ -90,6 +91,10 @@ private fun HomePager(onOpenSensor: (String) -> Unit) {
     val compareVm: CompareViewModel = viewModel()
 
     fun goTo(page: Int) = scope.launch { pagerState.animateScrollToPage(page) }
+
+    // Back from the compare page returns to the sensor list rather than
+    // leaving the app, the same as its on-screen back arrow.
+    BackHandler(enabled = pagerState.currentPage != PAGE_SENSORS) { goTo(PAGE_SENSORS) }
 
     Box(Modifier.fillMaxSize()) {
         HorizontalPager(state = pagerState, modifier = Modifier.fillMaxSize()) { page ->
